@@ -59,14 +59,21 @@ const stages = [
   },
 ];
 
+const startAt = args?.startAt ?? 1;
+if (!Number.isInteger(startAt) || startAt < 1 || startAt > stages.length) {
+  throw new Error(`startAt must be an integer from 1 to ${stages.length}.`);
+}
+const activeStages = stages.filter((stage) => stage.order >= startAt);
+
 phase("Implement");
 const completed = [];
-for (let index = 0; index < stages.length; index += 1) {
-  const stage = stages[index];
+for (let index = 0; index < activeStages.length; index += 1) {
+  const stage = activeStages[index];
   log(`Starting stage ${stage.order}: ${stage.plan}`);
 
   const result = await agent(
     `You own NixCP implementation stage ${stage.order} of ${stages.length}: ${stage.title}.
+This workflow invocation starts at stage ${startAt}; all earlier stages were already committed and pushed.
 Plan document: ${stage.plan}
 
 Work directly in the current repository and current branch. Earlier stages have been implemented, committed, and pushed by preceding workers in this same strictly sequential workflow. Do not use or create a worktree.
@@ -83,7 +90,7 @@ Required procedure:
 
 Do not stop after analysis or merely report recommendations: perform the implementation, tests, commit, and push. If blocked, do not fabricate success and do not create a partial commit; explain the precise blockers and leave the worktree clean. Otherwise end your ordinary text response with these exact lines:
 STATUS: completed
-COMMIT: <full 40-character SHA>
+COMMIT: <Git commit SHA (abbreviated or full)>
 PUSHED: yes
 TESTS: <semicolon-separated commands run>
 SUMMARY: <one concise sentence>`,
@@ -100,10 +107,10 @@ SUMMARY: <one concise sentence>`,
     typeof result !== "string" ||
     !result.includes("STATUS: completed") ||
     !result.includes("PUSHED: yes") ||
-    !/COMMIT: [0-9a-f]{40}/.test(result)
+    !/COMMIT: [0-9a-f]{7,40}/.test(result)
   ) {
     throw new Error(
-      `Stage ${stage.order} did not report a completed, pushed 40-character commit. Result: ${String(result)}`,
+      `Stage ${stage.order} did not report a completed, pushed commit. Result: ${String(result)}`,
     );
   }
 
@@ -111,4 +118,4 @@ SUMMARY: <one concise sentence>`,
   log(`Stage ${stage.order} reported a pushed commit.`);
 }
 
-return { stages, completed };
+return { startAt, stages: activeStages, completed };

@@ -89,7 +89,7 @@ TESTS: <semicolon-separated commands run>
 SUMMARY: <one concise sentence>`,
     {
       provider: "pi",
-      model: "omniroute/cx/gpt-5.3-codex-spark",
+      model: "omniroute/xk/openai/gpt-5.3-codex-spark",
       reasoningLevel: "none",
       label: `Stage ${stage.order}: ${stage.title}`,
       phase: "Implement",

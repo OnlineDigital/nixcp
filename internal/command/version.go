@@ -5,13 +5,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newVersionCommand() *cobra.Command {
+func newVersionCommand(meta BuildMetadata) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			payload := output.Success("version", false, map[string]any{"version": "0.0.0"}, nil)
-			return emitJSON(cmd, payload)
+			data := map[string]string{
+				"version": meta.Version,
+			}
+			if meta.Commit != "" {
+				data["commit"] = meta.Commit
+			}
+			if meta.BuiltAt != "" {
+				data["built_at"] = meta.BuiltAt
+			}
+			payload := output.Success("version", false, data, nil)
+			if cmd.Flags().Changed("json") {
+				return emitJSON(cmd, payload)
+			}
+			cmd.Printf("%s\n", meta.Version)
+			return nil
 		},
 	}
 }

@@ -2,29 +2,106 @@ package command
 
 import (
 	"context"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/nixcp/nixcp/internal/errors"
+	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/nix"
 	"github.com/nixcp/nixcp/internal/output"
+	"github.com/nixcp/nixcp/internal/platform"
 	"github.com/spf13/cobra"
 )
 
-// ApplicationRoot wraps the root command.
-type ApplicationRoot struct {
-	Root *cobra.Command
+const defaultVersion = "0.0.0"
+
+// BuildMetadata exposes version/build metadata for `ncp version`.
+type BuildMetadata struct {
+	Version string
+	Commit  string
+	BuiltAt string
 }
 
-// NewRootCommand constructs all stage-1 CLI commands and flags.
-func NewRootCommand(_ context.Context) (*cobra.Command, error) {
+// Runtime holds injected stage-2 adapters.
+type Runtime struct {
+	Runner   execx.Runner
+	Metadata BuildMetadata
+	Platform platform.Inspector
+	Renderer nix.Renderer
+}
+
+// RuntimeOption configures the composition root.
+type RuntimeOption func(*Runtime)
+
+// WithRunner injects a process runner.
+func WithRunner(r execx.Runner) RuntimeOption {
+	return func(rt *Runtime) {
+		if r != nil {
+			rt.Runner = r
+		}
+	}
+}
+
+// WithBuildMetadata injects version/build metadata.
+func WithBuildMetadata(meta BuildMetadata) RuntimeOption {
+	return func(rt *Runtime) {
+		if meta.Version != "" {
+			rt.Metadata.Version = meta.Version
+		}
+		rt.Metadata.Commit = meta.Commit
+		rt.Metadata.BuiltAt = meta.BuiltAt
+	}
+}
+
+// ApplicationRoot wraps the command tree and process lifecycle.
+type ApplicationRoot struct {
+	Root   *cobra.Command
+	Ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func defaultRuntime() Runtime {
+	return Runtime{
+		Runner: &execx.RealRunner{},
+		Metadata: BuildMetadata{
+			Version: defaultVersion,
+		},
+		Platform: platform.HostInspector{},
+		Renderer: nix.Renderer{},
+	}
+}
+
+// NewRootCommand constructs the root command and all supported subcommands.
+func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	runtime := defaultRuntime()
+	for _, opt := range opts {
+		opt(&runtime)
+	}
+
 	root := &cobra.Command{
 		Use:           "ncp",
 		Short:         "NixCP CLI",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if commandJSON(cmd) {
+				payload := output.Success("ncp", false, map[string]any{"version": runtime.Metadata.Version}, nil)
+				return emitJSON(cmd, payload)
+			}
+			cmd.Printf("NixCP CLI %s\n", runtime.Metadata.Version)
+			return nil
+		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			jsonOut, err := cmd.Flags().GetBool("json")
+			cmd.Root().Annotations["invoked-command"] = cmd.CommandPath()
+			jsonOut, err := commandBoolFlag(cmd, "json")
 			if err != nil {
-				return err
+				return errors.New("invalid_flag_state", err.Error(), "", errors.ExitCodePrecond)
 			}
 			if jsonOut {
 				_ = cmd.Flags().Set("no-input", "true")
@@ -33,12 +110,15 @@ func NewRootCommand(_ context.Context) (*cobra.Command, error) {
 		},
 	}
 
+	root.SetContext(ctx)
+	root.Annotations = map[string]string{}
+
 	root.PersistentFlags().Bool("json", false, "Emit a single JSON object")
 	root.PersistentFlags().Bool("no-input", false, "Disable interactive prompts")
 	root.PersistentFlags().Bool("yes", false, "Skip confirmation prompts")
 	root.PersistentFlags().Duration("timeout", 30*time.Second, "Operation timeout")
 
-	root.AddCommand(newInstallCommand())
+	root.AddCommand(newInstallCommand(runtime))
 	root.AddCommand(newStatusCommand())
 	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newServiceCommand())
@@ -51,28 +131,84 @@ func NewRootCommand(_ context.Context) (*cobra.Command, error) {
 	root.AddCommand(newUnlinkCommand())
 	root.AddCommand(newSitesCommand())
 	root.AddCommand(newShellCommand())
-	root.AddCommand(newVersionCommand())
+	root.AddCommand(newVersionCommand(runtime.Metadata))
+
+	root.InitDefaultCompletionCmd()
 
 	return root, nil
 }
 
-func New(ctx context.Context) (*ApplicationRoot, error) {
-	root, err := NewRootCommand(ctx)
+// New builds the composition root and applies process-signal cancellation semantics.
+func New(ctx context.Context, opts ...RuntimeOption) (*ApplicationRoot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	rootCtx, cancel := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	runtime := defaultRuntime()
+	for _, opt := range opts {
+		opt(&runtime)
+	}
+
+	root, err := NewRootCommand(rootCtx, opts...)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	return &ApplicationRoot{Root: root}, nil
+
+	_ = runtime
+	return &ApplicationRoot{Root: root, Ctx: rootCtx, cancel: cancel}, nil
 }
 
+// Execute runs the command tree and returns a contract-compatible exit code.
 func (a *ApplicationRoot) Execute() int {
-	err := a.Root.Execute()
+	defer func() {
+		if a.cancel != nil {
+			a.cancel()
+		}
+	}()
+
+	err := a.Root.ExecuteContext(a.Ctx)
 	if err == nil {
 		return int(errors.ExitCodeSuccess)
 	}
+
 	appErr := errors.Normalize(err)
-	if jsonOut, _ := a.Root.PersistentFlags().GetBool("json"); jsonOut {
-		payload := output.Error("", "ncp_error", appErr.Message, "", nil)
-		_ = output.WriteJSON(a.Root.ErrOrStderr(), payload)
+	jsonOut, _ := commandBoolFlag(a.Root, "json")
+	if jsonOut {
+		commandName := invokedCommandName(a.Root)
+		payload := output.Error(commandName, appErr.Code, appErr.Message, appErr.Hint, appErr.CauseAsWarnings())
+		_ = output.WriteJSON(a.Root.OutOrStdout(), payload)
 	}
+
 	return int(appErr.ExitCode())
+}
+
+func invokedCommandName(root *cobra.Command) string {
+	if root == nil {
+		return "ncp"
+	}
+	if name := root.Annotations["invoked-command"]; name != "" {
+		return name
+	}
+	return root.Name()
+}
+
+// commandTimeout reads timeout from command flags.
+func commandTimeout(cmd *cobra.Command) (time.Duration, error) {
+	return commandDurationFlag(cmd, "timeout")
+}
+
+func commandBoolFlag(cmd *cobra.Command, name string) (bool, error) {
+	if cmd == nil {
+		return false, nil
+	}
+	return cmd.Flags().GetBool(name)
+}
+
+func commandDurationFlag(cmd *cobra.Command, name string) (time.Duration, error) {
+	if cmd == nil {
+		return 0, nil
+	}
+	return cmd.Flags().GetDuration(name)
 }

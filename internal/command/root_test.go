@@ -4,7 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/nixcp/nixcp/internal/errors"
+	"github.com/nixcp/nixcp/internal/execx"
 )
 
 func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
@@ -37,18 +43,18 @@ func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
 }
 
 func TestStatusJSONOutputIsSingleObject(t *testing.T) {
-	root, err := NewRootCommand(context.Background())
+	app, err := New(context.Background())
 	if err != nil {
-		t.Fatalf("failed to build root command: %v", err)
+		t.Fatalf("failed to build app: %v", err)
 	}
-
 	buf := bytes.Buffer{}
-	root.SetOut(&buf)
-	root.SetErr(&bytes.Buffer{})
-	root.SetArgs([]string{"--json", "status"})
+	app.Root.SetOut(&buf)
+	app.Root.SetErr(&bytes.Buffer{})
+	app.Root.SetArgs([]string{"--json", "status"})
 
-	if err := root.Execute(); err != nil {
-		t.Fatalf("expected status success, got error: %v", err)
+	code := app.Execute()
+	if code != int(errors.ExitCodeSuccess) {
+		t.Fatalf("expected success code, got %d", code)
 	}
 
 	var payload map[string]any
@@ -65,19 +71,154 @@ func TestStatusJSONOutputIsSingleObject(t *testing.T) {
 }
 
 func TestJSONImposesNoInput(t *testing.T) {
-	// ensure command runs and emits JSON when no-input isn't explicitly provided
-	root, err := NewRootCommand(context.Background())
+	app, err := New(context.Background())
 	if err != nil {
-		t.Fatalf("failed to build root command: %v", err)
+		t.Fatalf("failed to build app: %v", err)
 	}
-	root.SetArgs([]string{"--json", "status"})
+	app.Root.SetArgs([]string{"--json", "status"})
 	buf := bytes.Buffer{}
-	root.SetOut(&buf)
-	root.SetErr(&bytes.Buffer{})
-	if err := root.Execute(); err != nil {
-		t.Fatalf("expected success with json: %v", err)
+	app.Root.SetOut(&buf)
+	app.Root.SetErr(&bytes.Buffer{})
+	code := app.Execute()
+	if code != int(errors.ExitCodeSuccess) {
+		t.Fatalf("expected success with json: got %d", code)
 	}
 	if !json.Valid(buf.Bytes()) {
 		t.Fatalf("expected valid JSON output, got: %q", buf.String())
+	}
+	if v, err := app.Root.Flags().GetBool("no-input"); err == nil && !v {
+		t.Fatalf("expected --json to force --no-input, got %v", v)
+	}
+}
+
+func TestVersionUsesInjectedMetadata(t *testing.T) {
+	app, err := New(context.Background(), WithBuildMetadata(BuildMetadata{
+		Version: "1.2.3",
+		Commit:  "abc123",
+		BuiltAt: "2025-01-01T00:00:00Z",
+	}))
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+
+	buf := bytes.Buffer{}
+	app.Root.SetOut(&buf)
+	app.Root.SetErr(&bytes.Buffer{})
+	app.Root.SetArgs([]string{"--json", "version"})
+
+	if code := app.Execute(); code != int(errors.ExitCodeSuccess) {
+		t.Fatalf("version should succeed: %d", code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+		t.Fatalf("expected json payload: %v", err)
+	}
+	if payload["command"] != "version" {
+		t.Fatalf("unexpected command in payload: %#v", payload["command"])
+	}
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected data map, got %T", payload["data"])
+	}
+	if data["version"] != "1.2.3" || data["commit"] != "abc123" || data["built_at"] != "2025-01-01T00:00:00Z" {
+		t.Fatalf("unexpected version metadata payload: %#v", data)
+	}
+}
+
+func TestStatusJSONDoesNotPrintUsageOnUsageError(t *testing.T) {
+	app, err := New(context.Background(), WithBuildMetadata(BuildMetadata{Version: "1.2.3"}))
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+
+	buf := bytes.Buffer{}
+	errBuf := bytes.Buffer{}
+	app.Root.SetOut(&buf)
+	app.Root.SetErr(&errBuf)
+	app.Root.SetArgs([]string{"--json", "status", "--invalid"})
+
+	code := app.Execute()
+	if code != int(errors.ExitCodeUsage) {
+		t.Fatalf("expected usage exit class on invalid arg: %d, got %d", errors.ExitCodeUsage, code)
+	}
+	if strings.TrimSpace(errBuf.String()) != "" {
+		t.Fatalf("expected no usage/error in stderr, got: %q", errBuf.String())
+	}
+}
+
+func TestCommandTimeoutFlagDefaultsAndOverride(t *testing.T) {
+	app, err := New(context.Background())
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+
+	app.Root.SetArgs([]string{"status"})
+	if err := app.Root.ParseFlags([]string{"--timeout", "5s"}); err != nil {
+		t.Fatalf("parse flags failed: %v", err)
+	}
+	got, err := commandTimeout(app.Root)
+	if err != nil {
+		t.Fatalf("command timeout getter failed: %v", err)
+	}
+	if got != 5*time.Second {
+		t.Fatalf("expected timeout %s, got %s", 5*time.Second, got)
+	}
+}
+
+func TestNoopRootRunInJSONReturnsNcpPayload(t *testing.T) {
+	runner := &execx.FakeRunner{}
+	app, err := New(context.Background(), WithRunner(runner))
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+	app.Root.SetOut(io.Discard)
+	app.Root.SetErr(io.Discard)
+	app.Root.SetArgs([]string{"--json"})
+
+	if code := app.Execute(); code != int(errors.ExitCodeSuccess) {
+		t.Fatalf("expected success: %d", code)
+	}
+}
+
+func TestShellAliasEquality(t *testing.T) {
+	app, err := New(context.Background())
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+	for _, service := range []string{"nginx", "mariadb", "redis"} {
+		for _, action := range []string{"install", "start", "status", "stop", "restart"} {
+			aliasCmd, _, err := app.Root.Find([]string{service, action})
+			serviceCmd, _, err2 := app.Root.Find([]string{"service", service, action})
+			if err != nil || err2 != nil || aliasCmd == nil || serviceCmd == nil {
+				t.Fatalf("missing alias parity for %s %s: alias err=%v service err=%v", service, action, err, err2)
+			}
+			if aliasCmd.Use != action {
+				t.Fatalf("expected alias leaf use to be %q, got %q", action, aliasCmd.Use)
+			}
+		}
+	}
+}
+
+func TestCommandUsesNoPromptInJSON(t *testing.T) {
+	app, err := New(context.Background())
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+	app.Root.SetArgs([]string{"--json", "install"})
+	buf := bytes.Buffer{}
+	app.Root.SetOut(&buf)
+	app.Root.SetErr(&bytes.Buffer{})
+
+	if code := app.Execute(); code != int(errors.ExitCodePlatform) {
+		t.Fatalf("expected safe platform refusal on this non-NixOS host: %d", code)
+	}
+
+	if !json.Valid(buf.Bytes()) {
+		t.Fatalf("expected json output, got %q", buf.String())
+	}
+	if strings.Contains(strings.ToLower(buf.String()), "prompt") {
+		// conservative check: no prompt-like helpers should appear.
+		t.Fatalf("did not expect prompt words in json output")
 	}
 }

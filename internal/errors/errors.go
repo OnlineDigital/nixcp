@@ -1,6 +1,9 @@
 package errors
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ExitCode represents the stable CLI exit code class used by NixCP.
 type ExitCode int
@@ -73,9 +76,42 @@ func Normalize(err error) *AppError {
 	if appErr, ok := err.(*AppError); ok {
 		return appErr
 	}
+
+	msg := strings.TrimSpace(err.Error())
+	exit := ExitCodeRuntime
+	if msg == "" {
+		msg = "unknown error"
+	}
+	if isUsageError(msg) {
+		exit = ExitCodeUsage
+	}
 	return &AppError{
 		Code:      "runtime_error",
-		Message:   err.Error(),
-		ExitClass: ExitCodeRuntime,
+		Message:   msg,
+		ExitClass: exit,
+		Cause:     err,
 	}
+}
+
+func isUsageError(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, needle := range []string{"unknown command", "unknown flag", "unknown", "unknown argument", "accepts", "expects", "invalid argument"} {
+		if strings.Contains(lower, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *AppError) CauseAsWarnings() []string {
+	if e == nil {
+		return nil
+	}
+	if e.Cause != nil {
+		return []string{e.Cause.Error()}
+	}
+	if e.Details != "" {
+		return []string{e.Details}
+	}
+	return nil
 }

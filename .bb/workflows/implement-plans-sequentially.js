@@ -89,7 +89,7 @@ TESTS: <semicolon-separated commands run>
 SUMMARY: <one concise sentence>`,
     {
       provider: "pi",
-      model: "omniroute/xk/deepseek/deepseek-v4-pro",
+      model: "omniroute/cx/gpt-5.3-codex-spark",
       reasoningLevel: "none",
       label: `Stage ${stage.order}: ${stage.title}`,
       phase: "Implement",

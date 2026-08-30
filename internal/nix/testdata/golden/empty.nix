@@ -2,5 +2,5 @@
 # marker: nixcp-generated-module-v1; schema: 1; generator: 1
 { lib, pkgs, ... }: {
   assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux"; message = "NixCP requires x86_64-linux"; }];
-  environment.etc.\"nixcp/module-marker\".text = "nixcp-generated-module-v1\n";
+  environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
 }

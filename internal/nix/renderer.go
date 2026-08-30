@@ -30,7 +30,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	b.WriteString("# marker: " + Marker + "; schema: 1; generator: " + GeneratorVersion + "\n")
 	b.WriteString("{ lib, pkgs, ... }: {\n")
 	b.WriteString("  assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == \"x86_64-linux\"; message = \"NixCP requires x86_64-linux\"; }];\n")
-	b.WriteString("  environment.etc.\\\"nixcp/module-marker\\\".text = \"" + Marker + "\\n\";\n")
+	b.WriteString("  environment.etc.\"nixcp/module-marker\".text = \"" + Marker + "\\n\";\n")
 	renderServices(&b, s.Config)
 	renderPHP(&b, s.Config)
 	for _, site := range sortedSites(s.Sites) {
@@ -111,8 +111,8 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner string) {
 	if s.Nginx.Handler.Type == "generic" {
 		content = "try_files $uri $uri/ =404;"
 	}
-	fmt.Fprintf(b, "    locations.\\\"/\\\".extraConfig = %s;\n", nixString(content))
-	fmt.Fprintf(b, "    locations.\\\"~ \\.php$\\\".extraConfig = %s;\n", nixString("include "+"${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:"+socket+";"))
+	fmt.Fprintf(b, "    locations.\"/\".extraConfig = %s;\n", nixString(content))
+	fmt.Fprintf(b, "    locations.\"~ \\.php$\".extraConfig = %s;\n", nixString("include "+"${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:"+socket+";"))
 	b.WriteString("  };\n")
 }
 

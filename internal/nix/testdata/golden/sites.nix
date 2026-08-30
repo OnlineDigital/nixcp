@@ -2,7 +2,7 @@
 # marker: nixcp-generated-module-v1; schema: 1; generator: 1
 { lib, pkgs, ... }: {
   assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux"; message = "NixCP requires x86_64-linux"; }];
-  environment.etc.\"nixcp/module-marker\".text = "nixcp-generated-module-v1\n";
+  environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
   services.nginx.enable = true;
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
   environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
@@ -11,7 +11,7 @@
     listen = [{ addr = "0.0.0.0"; port = 80; }];
     root = "/home";
     extraConfig = "";
-    locations.\"/\".extraConfig = "try_files $uri $uri/ /index.php?$query_string;";
-    locations.\"~ \.php$\".extraConfig = "include \${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:/run/nixcp/php-fpm/example-test.sock;";
+    locations."/".extraConfig = "try_files $uri $uri/ /index.php?$query_string;";
+    locations."~ \.php$".extraConfig = "include \${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:/run/nixcp/php-fpm/example-test.sock;";
   };
 }

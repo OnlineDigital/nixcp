@@ -59,7 +59,7 @@ func TestLoadRejectsSiteSymlinkAndUnexpectedEntries(t *testing.T) {
 }
 
 func TestStrictYAMLRejectsMultipleDocumentsAndNonMapping(t *testing.T) {
-	for _, raw := range [][]byte{[]byte("---\n[]\n"), []byte("schemaVersion: 1\n---\nschemaVersion: 1\n")} {
+	for _, raw := range [][]byte{[]byte("---\n[]\n"), []byte("schemaVersion: 2\n---\nschemaVersion: 2\n")} {
 		if _, err := NormalizeAndValidateConfig(raw); err == nil {
 			t.Fatalf("expected strict document rejection: %q", raw)
 		}
@@ -67,7 +67,7 @@ func TestStrictYAMLRejectsMultipleDocumentsAndNonMapping(t *testing.T) {
 }
 
 func TestValidateRejectsUnsupportedHandlersAndPHPVersions(t *testing.T) {
-	site := SiteConfig{SchemaVersion: 1, ID: "x", Domain: "example.com", ProjectPath: "/srv/x", DocumentRoot: "/srv/x", PHP: "7.4", Nginx: NginxConfig{Handler: HandlerConfig{Type: "generic"}}}
+	site := SiteConfig{SchemaVersion: 2, ID: "x", Domain: "example.com", ProjectPath: "/srv/x", DocumentRoot: "/srv/x", PHP: "7.4", Nginx: NginxConfig{Handler: HandlerConfig{Type: "generic"}}}
 	if err := ValidateSite(site); err == nil {
 		t.Fatal("expected unsupported handler/version rejection")
 	}

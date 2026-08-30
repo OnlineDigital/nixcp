@@ -11,8 +11,6 @@ import (
 )
 
 const (
-	schemaVersionCurrent = 1
-
 	rebuildModeTraditional = "traditional"
 	rebuildModeFlake       = "flake"
 

@@ -23,7 +23,7 @@ database. The VM scenarios listed below are CI/release fixtures only and are
 
 | Layer | Coverage |
 | --- | --- |
-| Go unit/property | strict YAML and migrations; domains/paths/DB names; PHP precedence; extension warnings; Nix and shell escaping; JSON envelopes; service state; no-op behavior |
+| Go unit/property | strict YAML; domains/paths/DB names; PHP precedence; extension warnings; Nix and shell escaping; JSON envelopes; service state; no-op behavior |
 | Renderer golden | empty module; service running/stopped policies; multi-PHP/extensions; Laravel/WordPress/generic/custom; multi-site/FPM; MariaDB; adversarial escaping |
 | Integration/fault | temporary HOME/fake adapters, aliases, lock timeout, every build/publish/switch/health/rollback branch, stale journal recovery, PHP/Artisan argv and non-destructive unlink |
 | Real shell | bash/zsh/fish source/delegation, current-shell activation, independent sessions, PATH de-duplication and injection resistance |

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	shellpkg "github.com/nixcp/nixcp/internal/shell"
+
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/php"
@@ -65,6 +67,50 @@ func TestPHPUseWritesLocalMarkerAtomically(t *testing.T) {
 		t.Fatalf("marker %q %v", b, err)
 	}
 }
+
+func TestPHPUseAcceptsStickyWorldWritableAncestor(t *testing.T) {
+	app, _, _ := phpTestApp(t)
+	d := t.TempDir() // CI temp roots are commonly beneath sticky /tmp.
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(d); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"php", "use", "8.3"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("sticky ancestor should be accepted, exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(d, ".php-version")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPHPUseRejectsNonStickyWorldWritableAncestor(t *testing.T) {
+	app, _, _ := phpTestApp(t)
+	unsafe := filepath.Join(t.TempDir(), "unsafe")
+	project := filepath.Join(unsafe, "project")
+	if err := os.Mkdir(unsafe, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unsafe, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(project, 0755); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"php", "use", "8.3"})
+	if code := app.Execute(); code == 0 {
+		t.Fatal("non-sticky world-writable ancestor must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(project, ".php-version")); !os.IsNotExist(err) {
+		t.Fatalf("marker written despite refusal: %v", err)
+	}
+}
 func TestArtisanRejectsSymlink(t *testing.T) {
 	app, _, _ := phpTestApp(t)
 	d := t.TempDir()
@@ -80,7 +126,7 @@ func TestArtisanRejectsSymlink(t *testing.T) {
 	}
 }
 func TestShellSnippetOnlyWrapsPHPUse(t *testing.T) {
-	s, err := shellSnippet("bash")
+	s, err := shellpkg.Snippet("bash")
 	if err != nil || !bytes.Contains([]byte(s), []byte("$1\" = php")) {
 		t.Fatalf("bad snippet %q %v", s, err)
 	}
@@ -206,7 +252,7 @@ func TestShellEmitPrintsOnlyShellCode(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	code := buf.String()
-	want, wantErr := shellActivation("bash", "8.3")
+	want, wantErr := shellpkg.Activation("bash", "8.3")
 	if wantErr != nil {
 		t.Fatal(wantErr)
 	}

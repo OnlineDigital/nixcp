@@ -9,6 +9,7 @@ import (
 
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/service"
+	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/transaction"
 )
@@ -70,6 +71,61 @@ func TestLinkRejectsUnsafeSnippet(t *testing.T) {
 	}
 }
 
+type recordingNginxConfig struct{ calls int }
+
+func (c *recordingNginxConfig) Verify(context.Context) error { c.calls++; return nil }
+
+type healthySiteProbe struct{ calls int }
+
+func (p *healthySiteProbe) CheckSite(_ context.Context, domain, id string, enabled bool) sitepkg.HealthStatus {
+	p.calls++
+	return sitepkg.HealthStatus{Domain: domain, SiteID: id, DesiredOn: enabled, SocketOK: true, HTTPOK: true, HTTPStatus: 200}
+}
+
+type recordingDatabaseHealth struct{ affected []string }
+
+func (h *recordingDatabaseHealth) Check(_ context.Context, affected []string) error {
+	h.affected = append([]string(nil), affected...)
+	return nil
+}
+
+func TestLinkDefaultTransactionRunsSiteAndDeclaredDatabaseHealth(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	config := &recordingNginxConfig{}
+	probe := &healthySiteProbe{}
+	database := &recordingDatabaseHealth{}
+	runner := &execx.FakeRunner{Handle: func(command *execx.Command) (execx.Result, error) {
+		if command.Name == "readlink" {
+			return execx.Result{Stdout: "/nix/store/test-system"}, nil
+		}
+		return execx.Result{}, nil
+	}}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(runner), WithServices(testSystemd{}), WithNginxConfigVerifier(config), WithSiteChecker(probe), WithDatabaseChecker(database))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := testSiteConfig(home)
+	cfg.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	cfg.Services.MariaDB = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"--json", "link", "database.example", "--php", "8.3", "--path", project, "--mariadb", "app"})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("link exit %d: out=%s err=%s", code, out, stderr)
+	}
+	if config.calls != 1 || probe.calls != 1 {
+		t.Fatalf("nginx checks=%d site probes=%d", config.calls, probe.calls)
+	}
+	if !containsString(database.affected, "database:app") || !containsString(database.affected, "site:"+state.GenerateStableSiteID("database.example", nil)) {
+		t.Fatalf("affected resources=%q", database.affected)
+	}
+}
+
 type testRebuilder struct{}
 
 func (testRebuilder) CurrentGeneration(context.Context) (string, error) { return "old", nil }
@@ -92,5 +148,5 @@ func (testSystemd) Status(context.Context, service.Name) (service.Actual, error)
 func (testSystemd) Restart(context.Context, service.Name) error { return nil }
 
 func testSiteConfig(home string) state.ConfigSnapshot {
-	return state.ConfigSnapshot{SchemaVersion: 1, Owner: state.Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}}
+	return state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
+	"github.com/nixcp/nixcp/internal/nginxsnippet"
 	"github.com/nixcp/nixcp/internal/output"
 	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/state"
@@ -147,7 +148,7 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 	for _, s := range snap.Sites {
 		ids[s.ID] = struct{}{}
 	}
-	site := state.SiteConfig{SchemaVersion: 1, ID: state.GenerateStableSiteID(domain, ids), Enabled: true, Domain: domain, ProjectPath: project, DocumentRoot: root, PHP: phpVersion, MariaDB: maria, Nginx: state.NginxConfig{Handler: handler}}
+	site := state.SiteConfig{SchemaVersion: 2, ID: state.GenerateStableSiteID(domain, ids), Enabled: true, Domain: domain, ProjectPath: project, DocumentRoot: root, PHP: phpVersion, MariaDB: maria, Nginx: state.NginxConfig{Handler: handler}}
 	snap.Sites = append(snap.Sites, site)
 	snap.Canonicalize()
 	if err := snap.Validate(); err != nil {
@@ -193,27 +194,7 @@ func canonicalFile(p string) (string, error) {
 	return filepath.Clean(a), nil
 }
 func validateSnippet(s string) error {
-	forbidden := []string{"server", "http", "events", "listen", "server_name", "root", "include", "upstream", "ssl", "certificate", "acme", "fastcgi_pass"}
-	for n, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(strings.Split(line, "#")[0])
-		if line == "" {
-			continue
-		}
-		f := strings.Fields(line)
-		if len(f) == 0 {
-			continue
-		}
-		d := strings.ToLower(f[0])
-		for _, x := range forbidden {
-			if d == x || strings.HasPrefix(d, x+"_") {
-				return fmt.Errorf("line %d: directive %s is forbidden", n+1, d)
-			}
-		}
-		if strings.Contains(line, "{") || strings.Contains(line, "}") {
-			return fmt.Errorf("line %d: blocks are forbidden", n+1)
-		}
-	}
-	return nil
+	return nginxsnippet.Validate(s)
 }
 func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap state.Snapshot, deletes []string, action string, site state.SiteConfig) error {
 	module, e := runtime.Renderer.Render(snap)
@@ -234,9 +215,20 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	}
 	manager := runtime.Transactions
 	if manager == nil {
-		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, desiredHealth{systemd: runtime.Services, name: "nginx", running: true})
+		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, transaction.CompositeHealth{
+			desiredHealth{systemd: runtime.Services, name: "nginx", running: true},
+			siteTransactionHealth(runtime, snap),
+			runtime.DatabaseCheck,
+		})
 	}
-	result, e := manager.Apply(cmd.Context(), transaction.Request{Files: files, Deletes: deletes, CandidateModule: "generated/nixcp-module.nix", Affected: []string{"nginx"}})
+	affected := []string{"nginx", "nginx-config"}
+	if action == "link" {
+		affected = append(affected, "site:"+site.ID)
+		if site.MariaDB != nil {
+			affected = append(affected, "database:"+site.MariaDB.Database)
+		}
+	}
+	result, e := manager.Apply(cmd.Context(), transaction.Request{Files: files, Deletes: deletes, CandidateModule: "generated/nixcp-module.nix", Affected: affected})
 	if e != nil {
 		return transactionError(e)
 	}
@@ -250,6 +242,23 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
 	return nil
 }
+
+func siteTransactionHealth(runtime Runtime, snap state.Snapshot) sitepkg.TransactionHealth {
+	sites := make(map[string]state.SiteConfig, len(snap.Sites))
+	for _, s := range snap.Sites {
+		sites[s.ID] = s
+	}
+	checker := runtime.SiteChecker
+	if checker == nil {
+		checker = sitepkg.RealChecker{}
+	}
+	config := runtime.NginxConfig
+	if config == nil {
+		config = sitepkg.NginxConfigVerifier{Runner: runtime.Runner}
+	}
+	return sitepkg.TransactionHealth{Config: config, Checker: checker, Sites: sites}
+}
+
 func newUnlinkCommand(runtime Runtime) *cobra.Command {
 	return &cobra.Command{Use: "unlink <domain-or-site-id>", Short: "Remove a site", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return runUnlink(c, runtime, a[0]) }}
 }

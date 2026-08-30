@@ -12,7 +12,7 @@ import (
 // StateError codes, and the hand-written semantic rules keep working.
 
 func validConfigYAML(home string) string {
-	return `schemaVersion: 1
+	return `schemaVersion: 2
 owner:
   username: alice
   uid: 1000
@@ -119,7 +119,7 @@ func TestStructuralConfigAcceptsRootHome(t *testing.T) {
 
 func TestStructuralSiteRejectsEmptyPHPAndBadHandlerType(t *testing.T) {
 	base := func(handler string) string {
-		return `schemaVersion: 1
+		return `schemaVersion: 2
 id: app-example-com
 enabled: true
 domain: app.example.com
@@ -152,7 +152,7 @@ func TestStructuralSiteAcceptsAllHandlerTypes(t *testing.T) {
 		"    type: generic\n",
 		"    type: template\n    name: laravel\n",
 	} {
-		doc := `schemaVersion: 1
+		doc := `schemaVersion: 2
 id: app-example-com
 enabled: true
 domain: app.example.com
@@ -171,7 +171,7 @@ nginx:
 func TestSemanticRulesStillRunAfterStructuralLayer(t *testing.T) {
 	// Structure is fine; PHP version is not in the allowlist — the
 	// hand-written semantic layer must still reject it with its own code.
-	doc := `schemaVersion: 1
+	doc := `schemaVersion: 2
 id: app-example-com
 enabled: true
 domain: app.example.com

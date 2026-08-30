@@ -9,7 +9,7 @@ import (
 
 // The declarative structural layer runs after strict YAML decoding and
 // canonicalization, before the semantic domain rules. It enforces the
-// structural contract of the v1 schema (non-empty fields, bounded lengths,
+// structural contract of the current schema (non-empty fields, bounded lengths,
 // enum membership, absolute paths). Semantic rules that need state-wide
 // context (uniqueness, cross-references, installed-version membership)
 // stay hand-written in ValidateConfig/ValidateSite so error codes stay
@@ -19,7 +19,7 @@ import (
 // Kept separate from the YAML document structs so tag churn on the wire
 // schema can never silently change validation semantics.
 type configValidation struct {
-	SchemaVersion int `validate:"required,eq=1"`
+	SchemaVersion int `validate:"required,eq=2"`
 	Owner         struct {
 		Username string `validate:"required,min=1,max=256"`
 		Group    string `validate:"required,min=1,max=256"`
@@ -35,7 +35,7 @@ type configValidation struct {
 
 // siteValidation mirrors SiteConfig's structural constraints.
 type siteValidation struct {
-	SchemaVersion int    `validate:"required,eq=1"`
+	SchemaVersion int    `validate:"required,eq=2"`
 	ID            string `validate:"required,min=1,max=128"`
 	Domain        string `validate:"required,min=1,max=253"`
 	ProjectPath   string `validate:"required,min=2,max=4096,is-abs-path"`

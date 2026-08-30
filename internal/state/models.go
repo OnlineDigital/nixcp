@@ -8,9 +8,12 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/nixcp/nixcp/internal/nginxsnippet"
 )
 
-const supportedSchemaVersion = 1
+// supportedSchemaVersion is the only state schema accepted by this binary.
+const supportedSchemaVersion = 2
 
 var phpVersionPattern = regexp.MustCompile(`^(?:8\.[0-9]+)$`)
 var siteIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
@@ -92,7 +95,7 @@ type Snapshot struct {
 
 // MarshalYAML preserves explicit nulls for nullable schema fields instead of
 // silently omitting them. This makes freshly generated config.yaml match the
-// published v1 schema and keeps canonical bytes stable.
+// published schema and keeps canonical bytes stable.
 func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 	type rebuildYAML struct {
 		Mode            string  `yaml:"mode"`
@@ -178,8 +181,8 @@ func (site *SiteConfig) Canonicalize() {
 }
 
 func ValidateConfig(cfg ConfigSnapshot) error {
-	if err := DefaultMigrationPolicy().Check(cfg.SchemaVersion); err != nil {
-		return err
+	if cfg.SchemaVersion != supportedSchemaVersion {
+		return newStateError("unsupported_schema", "schemaVersion must be 2", nil)
 	}
 	if cfg.Owner.Username == "" || cfg.Owner.Group == "" || cfg.Owner.Home == "" || !filepath.IsAbs(cfg.Owner.Home) {
 		return newStateError("invalid_owner", "owner must contain username, group, and absolute home", nil)
@@ -232,8 +235,8 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	return nil
 }
 func ValidateSite(site SiteConfig) error {
-	if err := DefaultMigrationPolicy().Check(site.SchemaVersion); err != nil {
-		return err
+	if site.SchemaVersion != supportedSchemaVersion {
+		return newStateError("unsupported_schema", "schemaVersion must be 2", nil)
 	}
 	if site.ID == "" || !siteIDPattern.MatchString(site.ID) {
 		return newStateError("invalid_site_id", "invalid site id", nil)
@@ -272,6 +275,18 @@ func ValidateSite(site SiteConfig) error {
 		info, err := os.Lstat(site.Nginx.Handler.Path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0444 == 0 || info.Size() > maxCustomSnippetBytes {
 			return newStateError("invalid_handler", "custom handler must be a readable regular file within the size limit", err)
+		}
+		content, err := readRegularNoFollow(site.Nginx.Handler.Path, maxCustomSnippetBytes)
+		if err != nil {
+			return newStateError("invalid_handler", "cannot read custom handler", err)
+		}
+		if err := nginxsnippet.Validate(string(content)); err != nil {
+			return newStateError("invalid_handler", "custom handler is not a permitted location snippet", err)
+		}
+		if site.Nginx.Handler.Content != "" {
+			if err := nginxsnippet.Validate(site.Nginx.Handler.Content); err != nil {
+				return newStateError("invalid_handler", "custom handler content is not a permitted location snippet", err)
+			}
 		}
 	}
 	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" && site.Nginx.Handler.Type != "generic" {
@@ -319,9 +334,12 @@ func NormalizeAndValidateConfig(raw []byte) (ConfigSnapshot, error) {
 		return cfg, err
 	}
 	cfg.Canonicalize()
+	if cfg.SchemaVersion != supportedSchemaVersion {
+		return cfg, newStateError("unsupported_schema", "schemaVersion must be 2", nil)
+	}
 	// Declarative structural layer (go-playground/validator) runs after
 	// canonicalization and before semantic rules: it guards the structural
-	// contract of the v1 schema on every parsed config.yaml.
+	// contract of the current schema on every parsed config.yaml.
 	if err := applyStructural("config", structuralConfig(cfg)); err != nil {
 		return cfg, err
 	}
@@ -333,6 +351,9 @@ func NormalizeAndValidateSite(raw []byte) (SiteConfig, error) {
 		return site, err
 	}
 	site.Canonicalize()
+	if site.SchemaVersion != supportedSchemaVersion {
+		return site, newStateError("unsupported_schema", "schemaVersion must be 2", nil)
+	}
 	// Same declarative structural layer for every parsed sites/*.yaml.
 	if err := applyStructural("site", structuralSite(site)); err != nil {
 		return site, err

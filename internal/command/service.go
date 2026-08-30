@@ -9,6 +9,7 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/output"
+	rebuildpkg "github.com/nixcp/nixcp/internal/rebuild"
 	"github.com/nixcp/nixcp/internal/service"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/transaction"
@@ -190,7 +191,7 @@ func defaultServiceTransaction(root string, rt Runtime, rebuild state.RebuildCon
 			args = append(args, "--impure")
 		}
 	}
-	return &transaction.Manager{Root: root, Locker: transaction.FlockLocker{Path: filepath.Join(root, "lock")}, Rebuilder: transaction.NixOSRebuilder{Runner: rt.Runner, SwitchArgs: args}, Health: health}
+	return &transaction.Manager{Root: root, Locker: transaction.FlockLocker{Path: filepath.Join(root, "lock")}, Rebuilder: rebuildpkg.NixOS{Runner: rt.Runner, SwitchArgs: args}, Health: health}
 }
 func systemdError(err error) error {
 	return apperrors.New("systemd_error", err.Error(), "Inspect the unit journal and retry", apperrors.ExitCodeHealth)

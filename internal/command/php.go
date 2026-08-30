@@ -13,6 +13,9 @@ import (
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/output"
 	"github.com/nixcp/nixcp/internal/php"
+	"github.com/nixcp/nixcp/internal/securefs"
+	shellpkg "github.com/nixcp/nixcp/internal/shell"
+	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/transaction"
 	"github.com/spf13/cobra"
@@ -174,11 +177,15 @@ func useLocalPHPWithShell(cmd *cobra.Command, runtime Runtime, raw, shell string
 	if err != nil {
 		return err
 	}
-	if err := writePHPMarker(filepath.Join(cwd, ".php-version"), v); err != nil {
+	project, err := safePHPProjectDir(cwd)
+	if err != nil {
+		return apperrors.New("php_version_write_failed", err.Error(), "Use a project outside unsafe world-writable directories", apperrors.ExitCodeRuntime)
+	}
+	if err := writePHPMarker(filepath.Join(project, ".php-version"), v); err != nil {
 		return apperrors.New("php_version_write_failed", err.Error(), "", apperrors.ExitCodeRuntime)
 	}
 	if shell != "" {
-		code, err := shellActivation(shell, v)
+		code, err := shellpkg.Activation(shell, v)
 		if err != nil {
 			return apperrors.New("invalid_shell", err.Error(), "", apperrors.ExitCodeUsage)
 		}
@@ -188,6 +195,9 @@ func useLocalPHPWithShell(cmd *cobra.Command, runtime Runtime, raw, shell string
 	return emitPHPResult(cmd, "use", v, true, nil, "local version written")
 }
 func writePHPMarker(path, v string) error {
+	return securefs.WithPrivateUmask(func() error { return writePHPMarkerPrivate(path, v) })
+}
+func writePHPMarkerPrivate(path, v string) error {
 	d := filepath.Dir(path)
 	f, err := os.CreateTemp(d, ".php-version-")
 	if err != nil {
@@ -208,6 +218,23 @@ func writePHPMarker(path, v string) error {
 		err = os.Rename(n, path)
 	}
 	return err
+}
+
+// safePHPProjectDir applies the same canonical-path and sticky-directory
+// policy used for linked sites before creating a project-local marker.
+func safePHPProjectDir(cwd string) (string, error) {
+	project, err := sitepkg.CanonicalizePath(cwd)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(project)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0555 != 0555 {
+		return "", fmt.Errorf("current directory must be readable and traversable")
+	}
+	if err := sitepkg.RefuseWorldWritable(project); err != nil {
+		return "", fmt.Errorf("current directory must not be beneath a world-writable directory")
+	}
+	return project, nil
 }
 func runPHP(cmd *cobra.Command, runtime Runtime, args []string) error {
 	_, snap, err := loadPHP(runtime)

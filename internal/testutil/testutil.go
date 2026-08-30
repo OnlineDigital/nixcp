@@ -78,7 +78,7 @@ func Transaction(home string) *transaction.Manager {
 // isolated state home.
 func BaseConfig(home string) state.ConfigSnapshot {
 	return state.ConfigSnapshot{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Owner:         state.Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home},
 		Platform:      state.Platform{System: "x86_64-linux"},
 		Rebuild:       state.RebuildConfig{Mode: "traditional"},

@@ -1,10 +1,15 @@
 package site
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/state"
 )
 
 func TestCanonicalizePathResolvesSymlinkChain(t *testing.T) {
@@ -23,6 +28,67 @@ func TestCanonicalizePathResolvesSymlinkChain(t *testing.T) {
 	}
 	if got != real {
 		t.Fatalf("expected %q, got %q", real, got)
+	}
+}
+
+type testConfigVerifier struct {
+	calls int
+	err   error
+}
+
+func (v *testConfigVerifier) Verify(context.Context) error { v.calls++; return v.err }
+
+type testSiteChecker struct {
+	calls  int
+	status HealthStatus
+}
+
+func (c *testSiteChecker) CheckSite(_ context.Context, domain, id string, enabled bool) HealthStatus {
+	c.calls++
+	status := c.status
+	status.Domain, status.SiteID, status.DesiredOn = domain, id, enabled
+	return status
+}
+
+func TestTransactionHealthChecksOnlyAffectedSitesAfterNginxConfig(t *testing.T) {
+	config := &testConfigVerifier{}
+	probe := &testSiteChecker{status: HealthStatus{SocketOK: true, HTTPOK: true, HTTPStatus: 200}}
+	health := TransactionHealth{Config: config, Checker: probe, Sites: map[string]state.SiteConfig{"one": {ID: "one", Domain: "example.test", Enabled: true}}}
+	if err := health.Check(context.Background(), []string{"nginx", "site:one"}); err != nil {
+		t.Fatal(err)
+	}
+	if config.calls != 1 || probe.calls != 1 {
+		t.Fatalf("config=%d probe=%d", config.calls, probe.calls)
+	}
+	if err := health.Check(context.Background(), []string{"mariadb"}); err != nil {
+		t.Fatal(err)
+	}
+	if config.calls != 1 || probe.calls != 1 {
+		t.Fatalf("unrelated transaction ran site checks")
+	}
+}
+
+func TestTransactionHealthFailsForDegradedSiteOrBadNginxConfig(t *testing.T) {
+	config := &testConfigVerifier{err: errors.New("invalid config")}
+	probe := &testSiteChecker{status: HealthStatus{SocketOK: true, HTTPOK: true}}
+	health := TransactionHealth{Config: config, Checker: probe, Sites: map[string]state.SiteConfig{"one": {ID: "one", Domain: "example.test", Enabled: true}}}
+	if err := health.Check(context.Background(), []string{"site:one"}); err == nil || probe.calls != 0 {
+		t.Fatalf("err=%v probe=%d", err, probe.calls)
+	}
+	config.err = nil
+	probe.status = HealthStatus{SocketOK: false, HTTPOK: true}
+	if err := health.Check(context.Background(), []string{"site:one"}); err == nil {
+		t.Fatal("degraded site passed")
+	}
+}
+
+func TestNginxConfigVerifierUsesFixedArgv(t *testing.T) {
+	runner := &execx.FakeRunner{}
+	if err := (NginxConfigVerifier{Runner: runner}).Verify(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.Runs) != 1 || runner.Runs[0].Name != "nginx" || len(runner.Runs[0].Args) != 1 || runner.Runs[0].Args[0] != "-t" {
+		t.Fatalf("unexpected command %#v", runner.Runs)
 	}
 }
 

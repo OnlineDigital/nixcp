@@ -105,7 +105,7 @@ func newInstallCommand(runtime Runtime) *cobra.Command {
 }
 
 func initialConfig(u *user.User, uid, gid int, group, flake string, impure bool) state.ConfigSnapshot {
-	cfg := state.ConfigSnapshot{SchemaVersion: 1, Owner: state.Owner{Username: u.Username, UID: uid, GID: gid, Group: group, Home: u.HomeDir}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}}
+	cfg := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: u.Username, UID: uid, GID: gid, Group: group, Home: u.HomeDir}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}}
 	if flake != "" {
 		cfg.Rebuild.Mode, cfg.Rebuild.Target, cfg.Rebuild.Impure = "flake", flake, impure
 	}

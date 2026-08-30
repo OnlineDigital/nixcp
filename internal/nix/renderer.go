@@ -74,6 +74,11 @@ func renderServicePolicy(b *strings.Builder, unit string, svc state.ServiceConfi
 }
 
 func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
+	if len(c.PHP.Installed) > 0 {
+		// Keep Composer system-owned and at a stable absolute path. The CLI
+		// runs this PHP script through the project-resolved PHP binary.
+		b.WriteString("  environment.etc.\"nixcp/composer/bin/composer\".source = \"${pkgs.phpPackages.composer}/bin/composer\";\n")
+	}
 	for _, v := range c.PHP.Installed {
 		entry, ok := php.Catalog[v]
 		if !ok {

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	shellpkg "github.com/nixcp/nixcp/internal/shell"
 )
 
 // Real-shell tests for the binary–shell protocol: the wrapper snippet and
@@ -24,7 +26,7 @@ func skipWithoutShell(t *testing.T, shell string) {
 // real bash and asserts the exported environment the protocol promises.
 func TestShellActivationExecutesInBash(t *testing.T) {
 	skipWithoutShell(t, "bash")
-	code, err := shellActivation("bash", "8.3")
+	code, err := shellpkg.Activation("bash", "8.3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,11 +59,11 @@ func TestShellActivationExecutesInBash(t *testing.T) {
 // element PATH.
 func TestShellActivationIsIdempotentInBash(t *testing.T) {
 	skipWithoutShell(t, "bash")
-	code83, err := shellActivation("bash", "8.3")
+	code83, err := shellpkg.Activation("bash", "8.3")
 	if err != nil {
 		t.Fatal(err)
 	}
-	code84, err := shellActivation("bash", "8.4")
+	code84, err := shellpkg.Activation("bash", "8.4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +98,7 @@ func TestShellActivationIsIdempotentInBash(t *testing.T) {
 // substitution patterns miss it and reactivation duplicates the entry.
 func TestShellActivationSingleEntryPATH(t *testing.T) {
 	skipWithoutShell(t, "bash")
-	code84, err := shellActivation("bash", "8.4")
+	code84, err := shellpkg.Activation("bash", "8.4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func TestShellActivationSingleEntryPATH(t *testing.T) {
 // the global exported variables.
 func TestShellActivationExecutesInFish(t *testing.T) {
 	skipWithoutShell(t, "fish")
-	code, err := shellActivation("fish", "8.4")
+	code, err := shellpkg.Activation("fish", "8.4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +155,7 @@ func TestShellActivationExecutesInFish(t *testing.T) {
 // falls through to `command ncp`.
 func TestShellSnippetExecutesAndDelegatesInBash(t *testing.T) {
 	skipWithoutShell(t, "bash")
-	snippet, err := shellSnippet("bash")
+	snippet, err := shellpkg.Snippet("bash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +189,7 @@ ncp status
 // TestShellSnippetExecutesInFish mirrors the bash wrapper test for fish.
 func TestShellSnippetExecutesInFish(t *testing.T) {
 	skipWithoutShell(t, "fish")
-	snippet, err := shellSnippet("fish")
+	snippet, err := shellpkg.Snippet("fish")
 	if err != nil {
 		t.Fatal(err)
 	}

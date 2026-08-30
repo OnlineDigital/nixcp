@@ -43,7 +43,7 @@ func TestGenerateStableSiteIDDeterministicAndCollisionSafe(t *testing.T) {
 
 func TestCanonicalConfigSortsAndDedupes(t *testing.T) {
 	cfg := ConfigSnapshot{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Owner:         Owner{Username: " alice ", Home: "/tmp/home", Group: "g", UID: 1, GID: 1},
 		Platform:      Platform{System: ""},
 		Rebuild:       RebuildConfig{Mode: ""},
@@ -71,7 +71,7 @@ func TestCanonicalConfigSortsAndDedupes(t *testing.T) {
 
 func TestValidateConfigRejectsUnsupportedSchema(t *testing.T) {
 	cfg := ConfigSnapshot{
-		SchemaVersion: 2,
+		SchemaVersion: 3,
 		Owner:         Owner{Username: "u", Home: "/tmp", Group: "g", UID: 1, GID: 1},
 		Platform:      Platform{System: "x86_64-linux"},
 		Rebuild:       RebuildConfig{Mode: "traditional"},
@@ -89,7 +89,7 @@ func TestValidateConfigRejectsUnsupportedSchema(t *testing.T) {
 
 func TestValidateConfigRejectsGlobalDefaultAndExtensions(t *testing.T) {
 	cfg := ConfigSnapshot{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Owner:         Owner{Username: "u", Home: "/tmp", Group: "g", UID: 1, GID: 1},
 		Platform:      Platform{System: "x86_64-linux"},
 		Rebuild:       RebuildConfig{Mode: "traditional"},
@@ -113,7 +113,7 @@ func TestValidateAndNormalizeSiteTemplateAndCustom(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	site := SiteConfig{SchemaVersion: 1, ID: "a", Domain: "example.com", ProjectPath: tmpDir, DocumentRoot: tmpDir, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "template", Name: "wordpress"}}}
+	site := SiteConfig{SchemaVersion: 2, ID: "a", Domain: "example.com", ProjectPath: tmpDir, DocumentRoot: tmpDir, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "template", Name: "wordpress"}}}
 	if err := ValidateSite(site); err != nil {
 		t.Fatalf("expected valid template handler site, got %v", err)
 	}
@@ -128,7 +128,7 @@ func TestValidateAndNormalizeSiteTemplateAndCustom(t *testing.T) {
 
 func TestNormalizeAndValidateRoundTripConfig(t *testing.T) {
 	raw := []byte(`
-schemaVersion: 1
+schemaVersion: 2
 owner:
   username: alice
   uid: 1000
@@ -160,7 +160,7 @@ php:
 	if err != nil {
 		t.Fatalf("expected valid config round-trip, got %v", err)
 	}
-	if cfg.SchemaVersion != 1 {
+	if cfg.SchemaVersion != 2 {
 		t.Fatalf("unexpected schema version: %d", cfg.SchemaVersion)
 	}
 }

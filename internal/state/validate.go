@@ -39,7 +39,7 @@ type siteValidation struct {
 	ID            string `validate:"required,min=1,max=128"`
 	Domain        string `validate:"required,min=1,max=253"`
 	ProjectPath   string `validate:"required,min=2,max=4096,is-abs-path"`
-	DocumentRoot string `validate:"required,min=2,max=4096,is-abs-path"`
+	DocumentRoot  string `validate:"required,min=2,max=4096,is-abs-path"`
 	PHP           string `validate:"required"`
 	Nginx         struct {
 		Handler struct {

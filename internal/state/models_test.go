@@ -113,7 +113,7 @@ func TestValidateAndNormalizeSiteTemplateAndCustom(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	site := SiteConfig{SchemaVersion: 1, ID: "a", Domain: "example.com", ProjectPath: tmpDir, DocumentRoot: tmpDir, PHP: "8.1", Nginx: NginxConfig{Handler: HandlerConfig{Type: "template", Name: "wordpress"}}}
+	site := SiteConfig{SchemaVersion: 1, ID: "a", Domain: "example.com", ProjectPath: tmpDir, DocumentRoot: tmpDir, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "template", Name: "wordpress"}}}
 	if err := ValidateSite(site); err != nil {
 		t.Fatalf("expected valid template handler site, got %v", err)
 	}

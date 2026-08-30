@@ -5,16 +5,17 @@ import (
 	"io"
 )
 
-// Warning represents a user-visible warning in command output.
-type Warning = string
+// Warning represents a user-visible warning in command output. It may be a
+// stable warning code or a structured compatibility warning.
+type Warning = any
 
 // SuccessEnvelope is the JSON payload for successful command execution.
 type SuccessEnvelope struct {
-	Ok       bool      `json:"ok"`
-	Command  string    `json:"command"`
-	Changed  bool      `json:"changed"`
-	Data     any       `json:"data"`
-	Warnings []Warning `json:"warnings"`
+	Ok       bool   `json:"ok"`
+	Command  string `json:"command"`
+	Changed  bool   `json:"changed"`
+	Data     any    `json:"data"`
+	Warnings any    `json:"warnings"`
 }
 
 // ErrorInfo is attached to failed command envelopes.
@@ -29,11 +30,11 @@ type ErrorEnvelope struct {
 	Ok       bool      `json:"ok"`
 	Command  string    `json:"command"`
 	Error    ErrorInfo `json:"error"`
-	Warnings []Warning `json:"warnings"`
+	Warnings any       `json:"warnings"`
 }
 
 // Success creates a stable success envelope.
-func Success(command string, changed bool, data any, warnings []Warning) SuccessEnvelope {
+func Success(command string, changed bool, data any, warnings any) SuccessEnvelope {
 	return SuccessEnvelope{
 		Ok:       true,
 		Command:  command,
@@ -44,7 +45,7 @@ func Success(command string, changed bool, data any, warnings []Warning) Success
 }
 
 // Error creates a stable error envelope.
-func Error(command, code, message, hint string, warnings []Warning) ErrorEnvelope {
+func Error(command, code, message, hint string, warnings any) ErrorEnvelope {
 	return ErrorEnvelope{
 		Ok:      false,
 		Command: command,

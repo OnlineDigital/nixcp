@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/nixcp/nixcp/internal/php"
 	"github.com/nixcp/nixcp/internal/state"
 )
 
@@ -67,11 +68,18 @@ func renderServicePolicy(b *strings.Builder, unit string, svc state.ServiceConfi
 
 func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
 	for _, v := range c.PHP.Installed {
-		attr := map[string]string{"8.3": "php83", "8.4": "php84"}[v]
-		if attr == "" {
-			continue // state validation permits catalog expansion before renderer support.
+		entry, ok := php.Catalog[v]
+		if !ok {
+			continue
 		}
-		fmt.Fprintf(b, "  environment.etc.%s.source = \"${pkgs.%s}/bin/php\";\n", nixString("nixcp/php/"+v+"/bin/php"), attr)
+		exts := make([]string, 0, len(c.PHP.Extensions))
+		for _, ext := range c.PHP.Extensions {
+			if attr, compatible := php.Compatible(v, ext); compatible {
+				exts = append(exts, "phpExtensions."+attr)
+			}
+		}
+		// PHP CLI and FPM consumers share this single nixpkgs composition.
+		fmt.Fprintf(b, "  environment.etc.%s.source = \"${(pkgs.%s.withExtensions ({ enabled, all }: enabled ++ [ %s ]))}/bin/php\";\n", nixString("nixcp/php/"+v+"/bin/php"), entry.Nixpkgs, strings.Join(exts, " "))
 	}
 }
 

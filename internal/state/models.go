@@ -313,6 +313,9 @@ func NormalizePHPVersion(raw string) (string, error) {
 	if !phpVersionPattern.MatchString(raw) {
 		return "", newStateError("invalid_php", "php version must be major.minor", nil)
 	}
+	if !IsSupportedPHPVersion(raw) {
+		return "", newStateError("unsupported_php_version", "PHP version is not in the supported nixpkgs catalog", nil)
+	}
 	return raw, nil
 }
 func validateDirectory(path, name string) error {

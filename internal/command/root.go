@@ -37,6 +37,9 @@ type Runtime struct {
 	StateHome    string // test-only override; production uses the current user's home.
 }
 
+// WithStateHome injects an isolated state home for tests.
+func WithStateHome(home string) RuntimeOption { return func(rt *Runtime) { rt.StateHome = home } }
+
 // RuntimeOption configures the composition root.
 type RuntimeOption func(*Runtime)
 
@@ -131,8 +134,8 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newServiceAliasCommand(runtime, service.Nginx))
 	root.AddCommand(newServiceAliasCommand(runtime, service.MariaDB))
 	root.AddCommand(newServiceAliasCommand(runtime, service.Redis))
-	root.AddCommand(newPHPCommand())
-	root.AddCommand(newArtisanCommand())
+	root.AddCommand(newPHPCommand(runtime))
+	root.AddCommand(newArtisanCommand(runtime))
 	root.AddCommand(newLinkCommand())
 	root.AddCommand(newUnlinkCommand())
 	root.AddCommand(newSitesCommand())

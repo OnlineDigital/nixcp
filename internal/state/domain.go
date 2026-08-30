@@ -144,6 +144,16 @@ func IsValidRebuildMode(mode string) bool {
 	}
 }
 
+// IsSupportedPHPVersion is the explicit v1 nixpkgs catalog boundary.
+func IsSupportedPHPVersion(version string) bool {
+	switch version {
+	case "8.3", "8.4":
+		return true
+	default:
+		return false
+	}
+}
+
 func IsValidExtName(raw string) bool {
 	name := strings.TrimSpace(strings.ToLower(raw))
 	if name == "" {

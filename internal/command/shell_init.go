@@ -2,40 +2,46 @@ package command
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/nixcp/nixcp/internal/output"
 	"github.com/spf13/cobra"
 )
 
 func newShellCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "shell", Short: "Shell helper setup"}
-
-	initCmd := &cobra.Command{
-		Use:   "init [bash|zsh|fish]",
-		Short: "Print shell function snippet",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			shell := args[0]
-			if !isSupportedShell(shell) {
-				return cmd.Help()
-			}
-			if commandJSON(cmd) {
-				payload := map[string]any{"ok": true, "command": "shell.init", "changed": false, "data": map[string]any{"shell": shell}, "warnings": []string{}}
-				return emitJSON(cmd, payload)
-			}
-			cmd.Print(fmt.Sprintf("function ncp() {} # %s", shell))
-			cmd.Println()
-			return nil
-		},
-	}
-	cmd.AddCommand(initCmd)
+	cmd.AddCommand(&cobra.Command{Use: "init [bash|zsh|fish]", Short: "Print shell function snippet", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		snippet, err := shellSnippet(a[0])
+		if err != nil {
+			return err
+		}
+		if commandJSON(c) {
+			return emitJSON(c, output.Success("shell.init", false, map[string]any{"shell": a[0]}, nil))
+		}
+		_, _ = fmt.Fprint(c.OutOrStdout(), snippet)
+		return nil
+	}})
 	return cmd
 }
-
-func isSupportedShell(name string) bool {
-	switch name {
-	case "bash", "zsh", "fish":
-		return true
-	default:
-		return false
+func isSupportedShell(s string) bool { return s == "bash" || s == "zsh" || s == "fish" }
+func shellActivation(shell, v string) (string, error) {
+	if !isSupportedShell(shell) {
+		return "", fmt.Errorf("unsupported shell")
 	}
+	bin := "/etc/nixcp/php/" + v + "/bin"
+	if shell == "fish" {
+		return "set -l old $NIXCP_PHP_BIN\nset -gx PATH " + fishQuote(bin) + " (string match -v -- $old $PATH)\nset -gx NIXCP_PHP_VERSION " + fishQuote(v) + "\nset -gx NIXCP_PHP_BIN " + fishQuote(bin) + "\n", nil
+	}
+	return "NIXCP_PHP_VERSION=" + shQuote(v) + "; NIXCP_PHP_BIN=" + shQuote(bin) + "; PATH=\"$NIXCP_PHP_BIN:${PATH//:$NIXCP_PHP_BIN/}\"; export NIXCP_PHP_VERSION NIXCP_PHP_BIN PATH\n", nil
 }
+func shellSnippet(shell string) (string, error) {
+	if !isSupportedShell(shell) {
+		return "", fmt.Errorf("unsupported shell")
+	}
+	if shell == "fish" {
+		return "function ncp\n  if test (count $argv) -eq 3; and test $argv[1] = php; and test $argv[2] = use\n    set -l code (command ncp $argv --shell-emit=fish); or return $status\n    source (printf '%s' $code | psub)\n  else\n    command ncp $argv\n  end\nend\n", nil
+	}
+	return "ncp() {\n  if [ \"$#\" -eq 3 ] && [ \"$1\" = php ] && [ \"$2\" = use ]; then\n    local code\n    code=\"$(command ncp \"$@\" --shell-emit=" + shell + ")\" || return $?\n    eval \"$code\"\n  else\n    command ncp \"$@\"\n  fi\n}\n", nil
+}
+func shQuote(s string) string   { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
+func fishQuote(s string) string { return shQuote(s) }

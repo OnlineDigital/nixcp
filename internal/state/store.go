@@ -349,6 +349,16 @@ func syncDir(path string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// MarshalConfig serializes a validated config document into canonical YAML for transactions.
+func MarshalConfig(cfg ConfigSnapshot) ([]byte, error) {
+	cfg.Canonicalize()
+	if err := ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
+	return marshalCanonical(cfg)
+}
+
 func marshalCanonical(v any) ([]byte, error) {
 	var b bytes.Buffer
 	enc := yaml.NewEncoder(&b)

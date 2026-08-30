@@ -12,6 +12,8 @@ import (
 	"github.com/nixcp/nixcp/internal/nix"
 	"github.com/nixcp/nixcp/internal/output"
 	"github.com/nixcp/nixcp/internal/platform"
+	"github.com/nixcp/nixcp/internal/service"
+	"github.com/nixcp/nixcp/internal/transaction"
 	"github.com/spf13/cobra"
 )
 
@@ -26,10 +28,13 @@ type BuildMetadata struct {
 
 // Runtime holds injected stage-2 adapters.
 type Runtime struct {
-	Runner   execx.Runner
-	Metadata BuildMetadata
-	Platform platform.Inspector
-	Renderer nix.Renderer
+	Runner       execx.Runner
+	Metadata     BuildMetadata
+	Platform     platform.Inspector
+	Renderer     nix.Renderer
+	Services     service.Systemd
+	Transactions *transaction.Manager
+	StateHome    string // test-only override; production uses the current user's home.
 }
 
 // RuntimeOption configures the composition root.
@@ -70,6 +75,7 @@ func defaultRuntime() Runtime {
 		},
 		Platform: platform.HostInspector{},
 		Renderer: nix.Renderer{},
+		Services: service.Adapter{Runner: &execx.RealRunner{}},
 	}
 }
 
@@ -121,10 +127,10 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newInstallCommand(runtime))
 	root.AddCommand(newStatusCommand())
 	root.AddCommand(newDoctorCommand())
-	root.AddCommand(newServiceCommand())
-	root.AddCommand(newServiceAliasCommand("nginx"))
-	root.AddCommand(newServiceAliasCommand("mariadb"))
-	root.AddCommand(newServiceAliasCommand("redis"))
+	root.AddCommand(newServiceCommand(runtime))
+	root.AddCommand(newServiceAliasCommand(runtime, service.Nginx))
+	root.AddCommand(newServiceAliasCommand(runtime, service.MariaDB))
+	root.AddCommand(newServiceAliasCommand(runtime, service.Redis))
 	root.AddCommand(newPHPCommand())
 	root.AddCommand(newArtisanCommand())
 	root.AddCommand(newLinkCommand())

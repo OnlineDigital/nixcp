@@ -92,6 +92,16 @@ func (s *Store) Load() (Snapshot, error) {
 		if err != nil {
 			return Snapshot{}, err
 		}
+		// Custom snippets are read once by Go after their regular/readable
+		// validation and carried in the in-memory snapshot. The renderer never
+		// asks Nix to import a mutable user file at evaluation time.
+		if site.Nginx.Handler.Type == "custom" {
+			content, readErr := os.ReadFile(site.Nginx.Handler.Path)
+			if readErr != nil {
+				return Snapshot{}, newStateError("invalid_handler", "cannot read custom handler", readErr)
+			}
+			site.Nginx.Handler.Content = string(content)
+		}
 		if e.Name() != site.ID+".yaml" {
 			return Snapshot{}, newStateError("invalid_site_filename", "site manifest filename must equal its id", nil)
 		}

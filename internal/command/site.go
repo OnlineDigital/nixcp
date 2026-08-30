@@ -12,6 +12,7 @@ import (
 	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/transaction"
+	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -72,6 +73,20 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 	config, _ := cmd.Flags().GetString("config")
 	if tmpl != "" && config != "" {
 		return apperrors.New("mutually_exclusive_flags", "--template and --config cannot be used together", "Choose one handler", apperrors.ExitCodeUsage)
+	}
+	// On a real TTY, a missing handler choice is a genuine choice: offer
+	// generic + templates. Non-interactive callers keep the generic default
+	// so scripted output stays byte-stable.
+	if tmpl == "" && config == "" && commandUIMode(cmd).Interactive() {
+		choice, e := ui.Select("HTTP handler", "How should nginx route this site?", []ui.SelectOption{
+			{Value: "generic", Label: "Generic", Desc: "FastCGI to PHP-FPM only"},
+			{Value: "laravel", Label: "Laravel", Desc: "Template for Laravel public/ structure"},
+			{Value: "wordpress", Label: "WordPress", Desc: "Template for WordPress"},
+		})
+		if e != nil {
+			return apperrors.New("handler_selection_failed", e.Error(), "", apperrors.ExitCodeUsage)
+		}
+		tmpl = choice
 	}
 	handler := state.HandlerConfig{Type: "generic"}
 	if tmpl != "" {
@@ -232,7 +247,7 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	if commandJSON(cmd) {
 		return emitJSON(cmd, output.Success(action, result.Changed, data, nil))
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", action, site.Domain, result.Phase)
+	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
 	return nil
 }
 func newUnlinkCommand(runtime Runtime) *cobra.Command {
@@ -259,6 +274,14 @@ func runUnlink(cmd *cobra.Command, runtime Runtime, key string) error {
 	}
 	if found == nil {
 		return apperrors.New("site_not_found", "site was not found", "Run: ncp sites list", apperrors.ExitCodePrecond)
+	}
+	// Destructive op: confirm only on a TTY without --yes/--json/--no-input;
+	// scripts keep today's non-interactive semantics.
+	if commandUIMode(cmd).Confirmable() {
+		ok, e := ui.Confirm("Unlink site " + found.Domain + " (" + found.ID + ")?")
+		if e != nil || !ok {
+			return apperrors.New("aborted_by_user", "aborted by user", "", apperrors.ExitCodeUsage)
+		}
 	}
 	remaining := []state.SiteConfig{}
 	for _, s := range snap.Sites {

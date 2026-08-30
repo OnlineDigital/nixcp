@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/nixcp/nixcp/internal/output"
+	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -95,4 +96,14 @@ func passthroughArgs(cmd *cobra.Command, args []string) []string {
 		return nil
 	}
 	return strings.Split(joined, "\x00")
+}
+
+// commandUIMode captures the interactive-UX gating flags for the running
+// command. It drives ui.Mode: prompts are only offered on a real TTY, never
+// under --json or --no-input, and confirmations are skipped under --yes.
+func commandUIMode(cmd *cobra.Command) ui.Mode {
+	jsonOut, _ := commandBoolFlag(cmd, "json")
+	noInput, _ := commandBoolFlag(cmd, "no-input")
+	yes, _ := commandBoolFlag(cmd, "yes")
+	return ui.Mode{JSON: jsonOut, NoInput: noInput, Yes: yes}
 }

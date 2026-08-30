@@ -11,6 +11,7 @@ import (
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/output"
 	"github.com/nixcp/nixcp/internal/state"
+	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -104,6 +105,18 @@ func emitDoctor(cmd *cobra.Command, report doctorReport) error {
 			marker = "warn"
 		case "skip":
 			marker = "skip"
+		}
+		// Marker is colorized only on a TTY without NO_COLOR; plain mode
+		// stays byte-identical for scripts.
+		switch c.Status {
+		case "pass":
+			marker = ui.OKLine(marker)
+		case "warn":
+			marker = ui.WarnLine(marker)
+		case "skip":
+			// skip is informational; no styling.
+		default:
+			marker = ui.FailLine(marker)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "[%s] %s: %s\n", marker, c.Name, c.Detail)
 	}

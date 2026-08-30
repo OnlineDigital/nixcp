@@ -91,6 +91,32 @@ func TestStructuralConfigRejectsRelativeHome(t *testing.T) {
 	}
 }
 
+func TestStructuralConfigAcceptsRootHome(t *testing.T) {
+	// A persisted config may legitimately carry owner.home = "/" (the
+	// root account); structural validation must not reject it, or an
+	// existing installation would read back as unconfigured.
+	doc := validConfigYAML(t.TempDir())
+	// Replace whatever home path the fixture carries with the root home.
+	lines := strings.Split(doc, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(l, "  home: ") {
+			lines[i] = "  home: /"
+			break
+		}
+	}
+	doc = strings.Join(lines, "\n")
+	if !strings.Contains(doc, "\n  home: /\n") {
+		t.Fatal("fixture did not carry a home line to replace")
+	}
+	cfg, err := NormalizeAndValidateConfig([]byte(doc))
+	if err != nil {
+		t.Fatalf("root home must remain loadable: %v", err)
+	}
+	if cfg.Owner.Home != "/" {
+		t.Fatalf("expected canonical home /, got %q", cfg.Owner.Home)
+	}
+}
+
 func TestStructuralSiteRejectsEmptyPHPAndBadHandlerType(t *testing.T) {
 	base := func(handler string) string {
 		return `schemaVersion: 1

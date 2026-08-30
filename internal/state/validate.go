@@ -23,7 +23,7 @@ type configValidation struct {
 	Owner         struct {
 		Username string `validate:"required,min=1,max=256"`
 		Group    string `validate:"required,min=1,max=256"`
-		Home     string `validate:"required,min=2,max=4096,is-abs-path"`
+		Home     string `validate:"required,max=4096,is-abs-path"`
 	} `validate:"required"`
 	Platform struct {
 		System string `validate:"required,eq=x86_64-linux"`

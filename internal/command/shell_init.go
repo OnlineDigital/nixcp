@@ -34,10 +34,11 @@ func shellActivation(shell, v string) (string, error) {
 	}
 	// Strip any previous NixCP bin from PATH (whatever its position), then
 	// prepend the new one: switching versions or re-sourcing must leave
-	// exactly one php bin in PATH, never conflicting duplicates. The strip
-	// only runs when NIXCP_PHP_BIN is set: an empty pattern would otherwise
-	// corrupt PATH (matching everywhere).
-	return "if [ -n \"$NIXCP_PHP_BIN\" ]; then PATH=\"${PATH//\"$NIXCP_PHP_BIN\":/}\"; PATH=\"${PATH//:\"$NIXCP_PHP_BIN\"/}\"; fi; NIXCP_PHP_VERSION=" + shQuote(v) + "; NIXCP_PHP_BIN=" + shQuote(bin) + "; PATH=\"$NIXCP_PHP_BIN:$PATH\"; export NIXCP_PHP_VERSION NIXCP_PHP_BIN PATH\n", nil
+	// exactly one php bin in PATH, never conflicting duplicates. Rebuilding
+	// PATH from its IFS-split entries handles every position, including a
+	// PATH consisting solely of the old bin; the strip only runs when
+	// NIXCP_PHP_BIN is set (an empty pattern would corrupt PATH).
+	return "if [ -n \"$NIXCP_PHP_BIN\" ]; then _nixcp_path=\"\"; IFS=\":\"; for _nixcp_p in $PATH; do [ -n \"$_nixcp_p\" ] && [ \"$_nixcp_p\" != \"$NIXCP_PHP_BIN\" ] && _nixcp_path=\"${_nixcp_path:+$_nixcp_path:}$_nixcp_p\"; done; unset IFS _nixcp_p; PATH=\"$_nixcp_path\"; unset _nixcp_path; fi; NIXCP_PHP_VERSION=" + shQuote(v) + "; NIXCP_PHP_BIN=" + shQuote(bin) + "; PATH=\"$NIXCP_PHP_BIN${PATH:+:$PATH}\"; export NIXCP_PHP_VERSION NIXCP_PHP_BIN PATH\n", nil
 }
 func shellSnippet(shell string) (string, error) {
 	if !isSupportedShell(shell) {

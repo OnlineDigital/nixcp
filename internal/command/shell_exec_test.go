@@ -83,11 +83,39 @@ func TestShellActivationIsIdempotentInBash(t *testing.T) {
 	if n := strings.Count(path, "/etc/nixcp/php/8.4/bin"); n != 1 {
 		t.Fatalf("double activation must keep exactly one PATH entry, found %d: %q", n, path)
 	}
-	if strings.Contains(path, "::") || strings.HasPrefix(path, ":") {
+	if strings.Contains(path, "::") || strings.HasPrefix(path, ":") || strings.HasSuffix(path, ":") {
 		t.Fatalf("activation corrupted PATH (empty elements): %q", path)
 	}
 	if !strings.HasPrefix(path, "/etc/nixcp/php/8.4/bin:") {
 		t.Fatalf("new bin must lead PATH, got %q", path)
+	}
+}
+
+// TestShellActivationSingleEntryPATH: regression for the review-reported
+// case where PATH consists solely of the old NIXCP bin — positional
+// substitution patterns miss it and reactivation duplicates the entry.
+func TestShellActivationSingleEntryPATH(t *testing.T) {
+	skipWithoutShell(t, "bash")
+	code84, err := shellActivation("bash", "8.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reactivation (and version switch) while PATH is solely the old bin:
+	// the old entry must be fully removed, not duplicated. NIXCP_PHP_BIN
+	// is set as any prior activation leaves it.
+	script := strings.TrimRight(code84, "\n") + `; printf '%s\n' "$PATH"`
+	cmd := exec.Command("bash", "-c", script)
+	cmd.Env = []string{"PATH=/etc/nixcp/php/8.3/bin", "NIXCP_PHP_BIN=/etc/nixcp/php/8.3/bin"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash rejected reactivation: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if n := strings.Count(got, "/etc/nixcp/php/8.3/bin"); n != 0 {
+		t.Fatalf("old bin must be gone after switch, found %d: %q", n, got)
+	}
+	if got != "/etc/nixcp/php/8.4/bin" {
+		t.Fatalf("expected exactly the new bin, got %q", got)
 	}
 }
 

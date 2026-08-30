@@ -250,11 +250,14 @@ func ValidateSite(site SiteConfig) error {
 	if site.ProjectPath == "/" || site.DocumentRoot == "/" {
 		return newStateError("invalid_path", "site paths cannot be the filesystem root", nil)
 	}
-	if err := validateDirectory(site.ProjectPath, "projectPath"); err != nil {
+	if err := validateProjectDirectory(site.ProjectPath, "projectPath"); err != nil {
 		return err
 	}
-	if err := validateDirectory(site.DocumentRoot, "documentRoot"); err != nil {
+	if err := validateProjectDirectory(site.DocumentRoot, "documentRoot"); err != nil {
 		return err
+	}
+	if rel, err := filepath.Rel(site.ProjectPath, site.DocumentRoot); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return newStateError("invalid_path", "documentRoot must be within projectPath", err)
 	}
 	if site.Nginx.Handler.Type == "template" && !IsTemplateHandler(site.Nginx.Handler.Name) {
 		return newStateError("invalid_handler", "unknown template handler", nil)
@@ -267,8 +270,8 @@ func ValidateSite(site SiteConfig) error {
 	}
 	if site.Nginx.Handler.Type == "custom" {
 		info, err := os.Lstat(site.Nginx.Handler.Path)
-		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0444 == 0 {
-			return newStateError("invalid_handler", "custom handler must be a readable regular file", err)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0444 == 0 || info.Size() > maxCustomSnippetBytes {
+			return newStateError("invalid_handler", "custom handler must be a readable regular file within the size limit", err)
 		}
 	}
 	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" && site.Nginx.Handler.Type != "generic" {
@@ -344,13 +347,30 @@ func NormalizePHPVersion(raw string) (string, error) {
 	}
 	return raw, nil
 }
-func validateDirectory(path, name string) error {
-	info, err := os.Stat(path)
+
+const maxCustomSnippetBytes int64 = 64 << 10
+
+func validateProjectDirectory(path, name string) error {
+	info, err := os.Lstat(path)
 	if err != nil || !info.IsDir() {
-		return newStateError("invalid_path", name+" must be an existing directory", err)
+		return newStateError("invalid_path", name+" must be an existing non-symlink directory", err)
 	}
 	if info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0444 == 0 {
 		return newStateError("invalid_path", name+" must be readable and traversable", nil)
+	}
+	// A project beneath a writable ancestor can be replaced after validation.
+	// v1 deliberately refuses that topology instead of mutating project modes.
+	for current := filepath.Clean(path); ; current = filepath.Dir(current) {
+		parent, statErr := os.Lstat(current)
+		if statErr != nil || !parent.IsDir() {
+			return newStateError("invalid_path", name+" has an unsafe ancestor", statErr)
+		}
+		if parent.Mode().Perm()&0002 != 0 && parent.Mode()&os.ModeSticky == 0 {
+			return newStateError("invalid_path", name+" cannot be under a world-writable directory", nil)
+		}
+		if current == "/" {
+			break
+		}
 	}
 	return nil
 }

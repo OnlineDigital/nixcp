@@ -39,6 +39,23 @@ Nginx location boundary, never parsed as Nix source. The generated module is
 HTTP-only (`listen` port 80) and intentionally contains no TLS, SSL, ACME,
 certificate, email, PECL, or other excluded functionality.
 
+## Security model and tenancy
+
+NixCP must be run directly by its configured normal user; it refuses root and
+sudo environments. Managed state is private and symlinks, unexpected entries,
+and unsafe ownership or modes are rejected before any privileged action. Project
+paths must be existing readable directories and may not sit beneath a
+non-sticky world-writable ancestor. NixCP never changes project permissions:
+if Nginx cannot read or traverse a project, the user must deliberately correct
+that project path's permissions.
+
+NixCP v1 is for applications controlled by one trusted user. Separate FPM pools
+and Unix sockets prevent accidental site cross-wiring, but they are **not** a
+hostile multi-tenant hosting isolation boundary. MariaDB and Redis remain bound
+to loopback/socket access; only Nginx HTTP port 80 is public. TLS is permanently
+outside this product's scope and custom Nginx snippets cannot add listener,
+server, include, TLS, or certificate directives.
+
 ## Candidate evaluation
 
 Candidate preparation writes `candidate-module.nix` and a wrapper that imports

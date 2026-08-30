@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,8 +16,9 @@ import (
 )
 
 const (
-	dirMode  fs.FileMode = 0700
-	fileMode fs.FileMode = 0600
+	dirMode        fs.FileMode = 0700
+	fileMode       fs.FileMode = 0600
+	maxSiteEntries             = 1_000
 )
 
 type Store struct{ Root string }
@@ -51,7 +53,7 @@ func (s *Store) Load() (Snapshot, error) {
 	if err := checkRegularPrivate(s.ConfigPath()); err != nil {
 		return Snapshot{}, err
 	}
-	raw, err := os.ReadFile(s.ConfigPath())
+	raw, err := readPrivateRegular(s.ConfigPath(), os.Getuid(), maxYAMLBytes)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -72,6 +74,9 @@ func (s *Store) Load() (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if len(entries) > maxSiteEntries {
+		return Snapshot{}, newStateError("unsafe_state_path", "sites directory has too many entries", nil)
+	}
 	sites := make([]SiteConfig, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
@@ -84,7 +89,7 @@ func (s *Store) Load() (Snapshot, error) {
 		if err := checkOwnedBy(path, cfg.Owner.UID); err != nil {
 			return Snapshot{}, err
 		}
-		b, err := os.ReadFile(path)
+		b, err := readPrivateRegular(path, cfg.Owner.UID, maxYAMLBytes)
 		if err != nil {
 			return Snapshot{}, err
 		}
@@ -96,7 +101,7 @@ func (s *Store) Load() (Snapshot, error) {
 		// validation and carried in the in-memory snapshot. The renderer never
 		// asks Nix to import a mutable user file at evaluation time.
 		if site.Nginx.Handler.Type == "custom" {
-			content, readErr := os.ReadFile(site.Nginx.Handler.Path)
+			content, readErr := readRegularNoFollow(site.Nginx.Handler.Path, maxCustomSnippetBytes)
 			if readErr != nil {
 				return Snapshot{}, newStateError("invalid_handler", "cannot read custom handler", readErr)
 			}
@@ -289,6 +294,36 @@ func checkRegularPrivate(path string) error {
 	}
 	return nil
 }
+func readPrivateRegular(path string, uid, limit int) ([]byte, error) {
+	b, err := readRegularNoFollow(path, int64(limit))
+	if err != nil {
+		return nil, err
+	}
+	if err := checkOwnedBy(path, uid); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// readRegularNoFollow validates the object actually opened, preventing a
+// symlink or replacement between pathname validation and content parsing.
+func readRegularNoFollow(path string, limit int64) ([]byte, error) {
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return nil, err
+	}
+	f := os.NewFile(uintptr(fd), path)
+	defer f.Close()
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(fd, &stat); err != nil {
+		return nil, err
+	}
+	if stat.Mode&syscall.S_IFMT != syscall.S_IFREG || stat.Size < 0 || stat.Size > limit {
+		return nil, newStateError("unsafe_state_path", "managed file is not a regular file within the size limit", nil)
+	}
+	return io.ReadAll(io.LimitReader(f, limit+1))
+}
+
 func checkOwnedBy(path string, uid int) error {
 	info, err := os.Lstat(path)
 	if err != nil {

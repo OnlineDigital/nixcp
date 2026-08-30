@@ -86,8 +86,8 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 			return apperrors.New("invalid_handler", e.Error(), "Custom config must be a readable regular file", apperrors.ExitCodePrecond)
 		}
 		b, e := os.ReadFile(p)
-		if e != nil || strings.ContainsRune(string(b), 0) {
-			return apperrors.New("invalid_handler", "custom config cannot be read safely", "Use a regular text file", apperrors.ExitCodePrecond)
+		if e != nil || int64(len(b)) > 64<<10 || strings.ContainsRune(string(b), 0) {
+			return apperrors.New("invalid_handler", "custom config cannot be read safely", "Use a regular text file within the 64 KiB limit", apperrors.ExitCodePrecond)
 		}
 		if e := validateSnippet(string(b)); e != nil {
 			return apperrors.New("invalid_handler", e.Error(), "Remove directives outside NixCP's location boundary", apperrors.ExitCodePrecond)
@@ -148,9 +148,18 @@ func canonicalDir(p string) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	i, e := os.Stat(a)
+	i, e := os.Lstat(a)
 	if e != nil || !i.IsDir() || i.Mode().Perm()&0555 != 0555 || a == "/" {
 		return "", fmt.Errorf("path must be an existing readable and traversable directory")
+	}
+	for current := filepath.Clean(a); ; current = filepath.Dir(current) {
+		ancestor, statErr := os.Lstat(current)
+		if statErr != nil || !ancestor.IsDir() || (ancestor.Mode().Perm()&0002 != 0 && ancestor.Mode()&os.ModeSticky == 0) {
+			return "", fmt.Errorf("path must not be beneath a world-writable directory")
+		}
+		if current == "/" {
+			break
+		}
 	}
 	return filepath.Clean(a), nil
 }

@@ -107,6 +107,9 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 			return nil
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+			if os.Geteuid() == 0 || os.Getenv("SUDO_UID") != "" || os.Getenv("SUDO_USER") != "" {
+				return errors.New("unsafe_privileged_execution", "NixCP must run as the configured unprivileged user, not through root or sudo", "Run ncp directly as your normal user", errors.ExitCodePrecond)
+			}
 			cmd.Root().Annotations["invoked-command"] = cmd.CommandPath()
 			jsonOut, err := commandBoolFlag(cmd, "json")
 			if err != nil {

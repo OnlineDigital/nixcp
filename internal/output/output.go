@@ -61,6 +61,8 @@ func Error(command, code, message, hint string, warnings any) ErrorEnvelope {
 // WriteJSON writes exactly one JSON object to out.
 func WriteJSON(out io.Writer, v any) error {
 	enc := json.NewEncoder(out)
-	enc.SetEscapeHTML(false)
+	// Escape HTML so JSON copied into a browser or log viewer cannot become
+	// markup. Encoder still emits exactly one newline-terminated object.
+	enc.SetEscapeHTML(true)
 	return enc.Encode(v)
 }

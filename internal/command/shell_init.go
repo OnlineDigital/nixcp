@@ -32,14 +32,19 @@ func shellActivation(shell, v string) (string, error) {
 	if shell == "fish" {
 		return "set -l old $NIXCP_PHP_BIN\nset -gx PATH " + fishQuote(bin) + " (string match -v -- $old $PATH)\nset -gx NIXCP_PHP_VERSION " + fishQuote(v) + "\nset -gx NIXCP_PHP_BIN " + fishQuote(bin) + "\n", nil
 	}
-	return "NIXCP_PHP_VERSION=" + shQuote(v) + "; NIXCP_PHP_BIN=" + shQuote(bin) + "; PATH=\"$NIXCP_PHP_BIN:${PATH//:$NIXCP_PHP_BIN/}\"; export NIXCP_PHP_VERSION NIXCP_PHP_BIN PATH\n", nil
+	// Strip any previous NixCP bin from PATH (whatever its position), then
+	// prepend the new one: switching versions or re-sourcing must leave
+	// exactly one php bin in PATH, never conflicting duplicates. The strip
+	// only runs when NIXCP_PHP_BIN is set: an empty pattern would otherwise
+	// corrupt PATH (matching everywhere).
+	return "if [ -n \"$NIXCP_PHP_BIN\" ]; then PATH=\"${PATH//\"$NIXCP_PHP_BIN\":/}\"; PATH=\"${PATH//:\"$NIXCP_PHP_BIN\"/}\"; fi; NIXCP_PHP_VERSION=" + shQuote(v) + "; NIXCP_PHP_BIN=" + shQuote(bin) + "; PATH=\"$NIXCP_PHP_BIN:$PATH\"; export NIXCP_PHP_VERSION NIXCP_PHP_BIN PATH\n", nil
 }
 func shellSnippet(shell string) (string, error) {
 	if !isSupportedShell(shell) {
 		return "", fmt.Errorf("unsupported shell")
 	}
 	if shell == "fish" {
-		return "function ncp\n  if test (count $argv) -eq 3; and test $argv[1] = php; and test $argv[2] = use\n    set -l code (command ncp $argv --shell-emit=fish); or return $status\n    source (printf '%s' $code | psub)\n  else\n    command ncp $argv\n  end\nend\n", nil
+		return "function ncp\n  if test (count $argv) -eq 3; and test $argv[1] = php; and test $argv[2] = use\n    set -l code (command ncp $argv --shell-emit=fish | string collect)\n    or return $status\n    source (printf '%s\n' $code | psub)\n  else\n    command ncp $argv\n  end\nend\n", nil
 	}
 	return "ncp() {\n  if [ \"$#\" -eq 3 ] && [ \"$1\" = php ] && [ \"$2\" = use ]; then\n    local code\n    code=\"$(command ncp \"$@\" --shell-emit=" + shell + ")\" || return $?\n    eval \"$code\"\n  else\n    command ncp \"$@\"\n  fi\n}\n", nil
 }

@@ -82,8 +82,20 @@ func (c RealChecker) CheckSite(ctx context.Context, domain, siteID string, desir
 
 // Describe renders a one-line human diagnostic.
 func (h HealthStatus) Describe() string {
+	// A status without an explicit problem code is only healthy when the
+	// probes actually passed; disabled sites (or any status where both
+	// probes failed without a code set) must not be reported as healthy.
 	if h.ProblemCode == "" {
-		return fmt.Sprintf("%s: healthy (socket ok, HTTP %d)", h.Domain, h.HTTPStatus)
+		if h.DesiredOn && h.SocketOK && h.HTTPOK {
+			return fmt.Sprintf("%s: healthy (socket ok, HTTP %d)", h.Domain, h.HTTPStatus)
+		}
+		if !h.DesiredOn {
+			if h.SocketOK || h.HTTPOK {
+				return fmt.Sprintf("%s: disabled but still serving traffic (socket ok: %t, HTTP %d)", h.Domain, h.SocketOK, h.HTTPStatus)
+			}
+			return fmt.Sprintf("%s: disabled (no traffic expected)", h.Domain)
+		}
+		return fmt.Sprintf("%s: degraded (socket ok: %t, HTTP %d)", h.Domain, h.SocketOK, h.HTTPStatus)
 	}
 	switch h.ProblemCode {
 	case "php_fpm_socket_missing":

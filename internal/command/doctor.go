@@ -84,7 +84,16 @@ func runDoctor(cmd *cobra.Command, runtime Runtime) error {
 
 func emitDoctor(cmd *cobra.Command, report doctorReport) error {
 	if commandJSON(cmd) {
-		return emitJSON(cmd, output.Success("doctor", false, report, nil))
+		// JSON consumers (automation) must see the failure exit code too:
+		// write the report envelope, then surface doctor_failed so the
+		// process exit code matches the human path.
+		if err := emitJSON(cmd, output.Success("doctor", false, report, nil)); err != nil {
+			return err
+		}
+		if report.Configured && !report.Healthy {
+			return apperrors.New("doctor_failed", "one or more diagnostic checks failed", "See the failing checks in the JSON report above", apperrors.ExitCodeRuntime)
+		}
+		return nil
 	}
 	for _, c := range report.Checks {
 		marker := "FAIL"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -131,11 +132,19 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 			cmd.Root().Annotations["invoked-command"] = cmd.CommandPath()
 			// Pass-through commands (php, artisan) disable flag parsing so raw
 			// argv reaches the interpreter; the global flags still have to be
-			// honored, so parse them from the raw argv tail ourselves.
+			// honored, so parse them from the raw argv tail ourselves and
+			// strip them so NixCP-only flags never reach the child process.
 			if cmd.DisableFlagParsing {
-				if err := parseGlobalFlags(cmd, args); err != nil {
+				cleaned, err := parseGlobalFlags(cmd, args)
+				if err != nil {
 					return err
 				}
+				// PersistentPreRunE receives args by value; stash the trimmed
+				// argv on the command so RunE re-reads it via passthroughArgs.
+				if cmd.Annotations == nil {
+					cmd.Annotations = map[string]string{}
+				}
+				cmd.Annotations["passthrough-args"] = strings.Join(cleaned, "\x00")
 			}
 			jsonOut, err := commandBoolFlag(cmd, "json")
 			if err != nil {
@@ -230,9 +239,7 @@ func takeTimeoutCancel(root *cobra.Command) context.CancelFunc {
 		delete(timeoutCancelRegistry, root)
 	}
 	return cancel
-}
-
-// Execute runs the command tree and returns a contract-compatible exit code.
+}// Execute runs the command tree and returns a contract-compatible exit code.
 func (a *ApplicationRoot) Execute() int {
 	defer func() {
 		if a.cancel != nil {

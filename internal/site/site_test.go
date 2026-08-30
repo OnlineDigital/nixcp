@@ -3,6 +3,7 @@ package site
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +82,27 @@ func TestRefuseWorldWritableRejectsPlainWorldWritableAncestor(t *testing.T) {
 	}
 	if err := RefuseWorldWritable(proj); err == nil {
 		t.Fatal("world-writable non-sticky ancestor must be refused")
+	}
+}
+
+func TestDescribeDisabledSiteNotHealthy(t *testing.T) {
+	// A disabled site must never be described as healthy, even when probes
+	// happen to succeed or the problem code is unset.
+	cases := []HealthStatus{
+		{Domain: "off.example", DesiredOn: false, SocketOK: false, HTTPOK: false},
+		{Domain: "off2.example", DesiredOn: false, SocketOK: true, HTTPOK: true, HTTPStatus: 200},
+		{Domain: "on.example", DesiredOn: true, SocketOK: false, HTTPOK: false},
+		{Domain: "half.example", DesiredOn: true, SocketOK: true, HTTPOK: false},
+	}
+	for _, c := range cases {
+		got := c.Describe()
+		if strings.Contains(got, "healthy") {
+			t.Errorf("status %#v described as healthy: %q", c, got)
+		}
+	}
+	// The only "healthy" case: enabled and both probes passing.
+	ok := HealthStatus{Domain: "ok.example", DesiredOn: true, SocketOK: true, HTTPOK: true, HTTPStatus: 200}
+	if s := ok.Describe(); !strings.Contains(s, "healthy") {
+		t.Errorf("healthy site misdescribed: %q", s)
 	}
 }

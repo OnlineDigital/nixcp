@@ -19,7 +19,7 @@ import (
 )
 
 func newPHPCommand(runtime Runtime) *cobra.Command {
-	cmd := &cobra.Command{Use: "php", Short: "PHP operations", Args: cobra.ArbitraryArgs, DisableFlagParsing: true, RunE: func(c *cobra.Command, a []string) error { return dispatchPHP(c, runtime, a) }}
+	cmd := &cobra.Command{Use: "php", Short: "PHP operations", Args: cobra.ArbitraryArgs, DisableFlagParsing: true, RunE: func(c *cobra.Command, a []string) error { return dispatchPHP(c, runtime, passthroughArgs(c, a)) }}
 	cmd.AddCommand(&cobra.Command{Use: "install <version>", Short: "Install supported PHP version", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return mutatePHP(c, runtime, "install", a[0]) }})
 	ext := &cobra.Command{Use: "ext", Short: "Nixpkgs PHP extensions"}
 	ext.AddCommand(&cobra.Command{Use: "install <name>", Short: "Install nixpkgs PHP extension", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return mutatePHP(c, runtime, "extension", a[0]) }})

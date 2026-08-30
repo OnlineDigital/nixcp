@@ -261,3 +261,45 @@ func TestPHPEnvDeduplicatesNixcpVars(t *testing.T) {
 		t.Fatalf("stale NIXCP_PHP_BIN kept: %v", got)
 	}
 }
+
+func TestPHPGlobalFlagsDoNotLeakToChildArgv(t *testing.T) {
+	app, r, _ := phpTestApp(t)
+	d := t.TempDir()
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	os.Chdir(d)
+	// NixCP-only flags placed after `php` must be consumed by NixCP and
+	// stripped from the argv the interpreter receives.
+	app.Root.SetArgs([]string{"php", "-v", "--json", "--timeout", "30s"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if len(r.Runs) != 1 {
+		t.Fatalf("expected exactly one child run, got %d", len(r.Runs))
+	}
+	for _, a := range r.Runs[0].Args {
+		if a == "--json" || a == "--timeout" || a == "30s" {
+			t.Fatalf("NixCP-only flag %q leaked to child argv: %#v", a, r.Runs[0].Args)
+		}
+	}
+}
+
+func TestPHPTimeoutValueNotForwardedAsStrayArg(t *testing.T) {
+	app, r, _ := phpTestApp(t)
+	d := t.TempDir()
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	os.Chdir(d)
+	app.Root.SetArgs([]string{"php", "-r", "echo 1;", "--timeout=45s"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("code %d", code)
+	}
+	if len(r.Runs) != 1 {
+		t.Fatalf("expected exactly one child run, got %d", len(r.Runs))
+	}
+	for _, a := range r.Runs[0].Args {
+		if strings.Contains(a, "--timeout") || a == "45s" {
+			t.Fatalf("timeout token/value leaked to child argv: %#v", r.Runs[0].Args)
+		}
+	}
+}

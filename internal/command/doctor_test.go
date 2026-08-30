@@ -159,3 +159,42 @@ func TestStatusDegradesWhenSystemdUnavailable(t *testing.T) {
 type errBoom struct{}
 
 func (errBoom) Error() string { return "boom" }
+
+func TestDoctorJSONFailsOnUnhealthyHost(t *testing.T) {
+	home := t.TempDir()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the generated module AFTER initialization (a directory where
+	// the regular module file should be) so the module diagnostic records
+	// a hard FAIL while the state store itself still loads.
+	moduleDir := filepath.Join(home, ".nixcp", "generated")
+	if err := os.RemoveAll(moduleDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(moduleDir, "nixcp-module.nix"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	app.Root.SetOut(&buf)
+	app.Root.SetArgs([]string{"doctor", "--json"})
+	code := app.Execute()
+	if code == 0 {
+		t.Fatalf("doctor --json on unhealthy host must not exit 0, got %d\n%s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), `"healthy":false`) {
+		t.Fatalf("expected healthy:false in JSON output, got:\n%s", buf.String())
+	}
+}

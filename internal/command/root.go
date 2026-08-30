@@ -239,7 +239,7 @@ func takeTimeoutCancel(root *cobra.Command) context.CancelFunc {
 		delete(timeoutCancelRegistry, root)
 	}
 	return cancel
-}// Execute runs the command tree and returns a contract-compatible exit code.
+} // Execute runs the command tree and returns a contract-compatible exit code.
 func (a *ApplicationRoot) Execute() int {
 	defer func() {
 		if a.cancel != nil {
@@ -261,11 +261,37 @@ func (a *ApplicationRoot) Execute() int {
 	jsonOut, _ := commandBoolFlag(a.Root, "json")
 	if jsonOut {
 		commandName := invokedCommandName(a.Root)
-		payload := output.Error(commandName, appErr.Code, appErr.Message, appErr.Hint, appErr.CauseAsWarnings())
-		_ = output.WriteJSON(a.Root.OutOrStdout(), payload)
+		// Passthrough failures (php/artisan) carry the child's own exit code,
+		// stderr, and signal; surface them as structured diagnostics instead
+		// of flattening everything into the message string.
+		if diags := appErrDiagnostics(appErr); diags != nil {
+			payload := output.ErrorWithDiagnostics(commandName, appErr.Code, appErr.Message, appErr.Hint, appErr.CauseAsWarnings(), diags)
+			_ = output.WriteJSON(a.Root.OutOrStdout(), payload)
+		} else {
+			payload := output.Error(commandName, appErr.Code, appErr.Message, appErr.Hint, appErr.CauseAsWarnings())
+			_ = output.WriteJSON(a.Root.OutOrStdout(), payload)
+		}
 	}
 
 	return int(appErr.ExitCode())
+}
+
+// appErrDiagnostics converts an AppError's process-passthrough metadata into
+// the structured diagnostics of the JSON error envelope. It returns nil for
+// non-process errors so their envelope stays exactly as before.
+func appErrDiagnostics(appErr *errors.AppError) []output.Diagnostic {
+	if appErr == nil || appErr.ProcessExit == nil {
+		return nil
+	}
+	pe := appErr.ProcessExit
+	exit := pe.ExitCode
+	return []output.Diagnostic{{
+		Type:    "process-exit",
+		Command: pe.Command,
+		Exit:    &exit,
+		Signal:  pe.Signal,
+		Stderr:  pe.Stderr,
+	}}
 }
 
 func invokedCommandName(root *cobra.Command) string {

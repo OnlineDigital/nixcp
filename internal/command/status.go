@@ -6,6 +6,7 @@ import (
 	"github.com/nixcp/nixcp/internal/output"
 	"github.com/nixcp/nixcp/internal/service"
 	"github.com/nixcp/nixcp/internal/state"
+	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,7 @@ func newStatusCommand(runtime Runtime) *cobra.Command {
 			if commandJSON(cmd) {
 				return emitJSON(cmd, output.Success("status", false, map[string]any{"desired": nil, "actual": nil, "configured": false}, nil))
 			}
-			cmd.Println("status: not-configured")
+			cmd.Println(ui.Heading("status") + ": not-configured")
 			return nil
 		}
 		actual := map[string]any{}
@@ -43,7 +44,7 @@ func newStatusCommand(runtime Runtime) *cobra.Command {
 		if commandJSON(cmd) {
 			return emitJSON(cmd, output.Success("status", false, data, nil))
 		}
-		cmd.Printf("status: configured (%d sites, php %s)\n", len(snap.Sites), snap.Config.PHP.GlobalDefault)
+		cmd.Printf("%s: configured (%d sites, php %s)\n", ui.Heading("status"), len(snap.Sites), snap.Config.PHP.GlobalDefault)
 		return nil
 	}}
 }

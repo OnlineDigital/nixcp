@@ -3,6 +3,7 @@ package state
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -10,6 +11,9 @@ import (
 )
 
 const supportedSchemaVersion = 1
+
+var phpVersionPattern = regexp.MustCompile(`^(?:8\.[0-9]+)$`)
+var siteIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 
 // ConfigSnapshot is config.yaml. Empty strings encode YAML null for nullable fields.
 type ConfigSnapshot struct {
@@ -82,6 +86,41 @@ type Snapshot struct {
 	Sites  []SiteConfig
 }
 
+// MarshalYAML preserves explicit nulls for nullable schema fields instead of
+// silently omitting them. This makes freshly generated config.yaml match the
+// published v1 schema and keeps canonical bytes stable.
+func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
+	type rebuildYAML struct {
+		Mode            string  `yaml:"mode"`
+		Target          *string `yaml:"target"`
+		Impure          bool    `yaml:"impure"`
+		ImportConfirmed bool    `yaml:"importConfirmed"`
+	}
+	type phpYAML struct {
+		Installed     []string `yaml:"installed"`
+		Extensions    []string `yaml:"extensions"`
+		GlobalDefault *string  `yaml:"globalDefault"`
+	}
+	type configYAML struct {
+		SchemaVersion int           `yaml:"schemaVersion"`
+		Owner         Owner         `yaml:"owner"`
+		Platform      Platform      `yaml:"platform"`
+		Rebuild       rebuildYAML   `yaml:"rebuild"`
+		Services      ServiceStates `yaml:"services"`
+		PHP           phpYAML       `yaml:"php"`
+	}
+	var target, globalDefault *string
+	if cfg.Rebuild.Target != "" {
+		value := cfg.Rebuild.Target
+		target = &value
+	}
+	if cfg.PHP.GlobalDefault != "" {
+		value := cfg.PHP.GlobalDefault
+		globalDefault = &value
+	}
+	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}}, nil
+}
+
 func (cfg *ConfigSnapshot) Canonicalize() {
 	cfg.Owner.Username = strings.TrimSpace(cfg.Owner.Username)
 	cfg.Owner.Group = strings.TrimSpace(cfg.Owner.Group)
@@ -112,6 +151,9 @@ func (site *SiteConfig) Canonicalize() {
 	site.ID = strings.TrimSpace(strings.ToLower(site.ID))
 	site.Domain = strings.TrimSpace(strings.ToLower(site.Domain))
 	site.Domain = strings.TrimSuffix(site.Domain, ".")
+	if normalized, err := NormalizeDomain(site.Domain); err == nil {
+		site.Domain = normalized
+	}
 	site.ProjectPath = filepath.Clean(site.ProjectPath)
 	site.DocumentRoot = filepath.Clean(site.DocumentRoot)
 	site.PHP = strings.TrimSpace(site.PHP)
@@ -124,8 +166,8 @@ func (site *SiteConfig) Canonicalize() {
 }
 
 func ValidateConfig(cfg ConfigSnapshot) error {
-	if cfg.SchemaVersion != supportedSchemaVersion {
-		return newStateError("unsupported_schema", "unsupported schemaVersion", nil)
+	if err := DefaultMigrationPolicy().Check(cfg.SchemaVersion); err != nil {
+		return err
 	}
 	if cfg.Owner.Username == "" || cfg.Owner.Group == "" || cfg.Owner.Home == "" || !filepath.IsAbs(cfg.Owner.Home) {
 		return newStateError("invalid_owner", "owner must contain username, group, and absolute home", nil)
@@ -141,6 +183,9 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	}
 	if cfg.Rebuild.Mode == "traditional" && cfg.Rebuild.Target != "" {
 		return newStateError("invalid_rebuild_target", "traditional rebuild mode cannot set target", nil)
+	}
+	if strings.ContainsAny(cfg.Rebuild.Target, "\x00\r\n") {
+		return newStateError("invalid_rebuild_target", "rebuild target contains unsafe characters", nil)
 	}
 	for name, svc := range map[string]ServiceConfig{"nginx": cfg.Services.Nginx, "mariadb": cfg.Services.MariaDB, "redis": cfg.Services.Redis} {
 		if !IsValidServiceState(svc.DesiredState) {
@@ -167,10 +212,10 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	return nil
 }
 func ValidateSite(site SiteConfig) error {
-	if site.SchemaVersion != supportedSchemaVersion {
-		return newStateError("unsupported_schema", "unsupported schemaVersion", nil)
+	if err := DefaultMigrationPolicy().Check(site.SchemaVersion); err != nil {
+		return err
 	}
-	if site.ID == "" || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`).MatchString(site.ID) {
+	if site.ID == "" || !siteIDPattern.MatchString(site.ID) {
 		return newStateError("invalid_site_id", "invalid site id", nil)
 	}
 	if _, err := NormalizeDomain(site.Domain); err != nil {
@@ -182,14 +227,29 @@ func ValidateSite(site SiteConfig) error {
 	if !filepath.IsAbs(site.ProjectPath) || !filepath.IsAbs(site.DocumentRoot) {
 		return newStateError("invalid_path", "site paths must be absolute", nil)
 	}
+	if site.ProjectPath == "/" || site.DocumentRoot == "/" {
+		return newStateError("invalid_path", "site paths cannot be the filesystem root", nil)
+	}
+	if err := validateDirectory(site.ProjectPath, "projectPath"); err != nil {
+		return err
+	}
+	if err := validateDirectory(site.DocumentRoot, "documentRoot"); err != nil {
+		return err
+	}
 	if site.Nginx.Handler.Type == "template" && !IsTemplateHandler(site.Nginx.Handler.Name) {
 		return newStateError("invalid_handler", "unknown template handler", nil)
 	}
 	if site.Nginx.Handler.Type == "custom" && (!filepath.IsAbs(site.Nginx.Handler.Path) || site.Nginx.Handler.Path == ".") {
 		return newStateError("invalid_handler", "custom handler requires absolute path", nil)
 	}
-	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" && site.Nginx.Handler.Type != "generic" {
-		return newStateError("invalid_handler", "handler type must be template, custom, or generic", nil)
+	if site.Nginx.Handler.Type == "custom" {
+		info, err := os.Stat(site.Nginx.Handler.Path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0444 == 0 {
+			return newStateError("invalid_handler", "custom handler must be a readable regular file", err)
+		}
+	}
+	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" {
+		return newStateError("invalid_handler", "handler type must be template or custom", nil)
 	}
 	if site.MariaDB != nil && !isValidMariaDBName(site.MariaDB.Database) {
 		return newStateError("invalid_mariadb", "invalid database name", nil)
@@ -207,11 +267,11 @@ func (s Snapshot) Validate() error {
 		if err := ValidateSite(site); err != nil {
 			return err
 		}
-		if ids[site.ID] || domains[site.Domain] {
+		if ids[site.ID] || domains[strings.ToLower(site.Domain)] {
 			return newStateError("duplicate_site", "duplicate site id or domain", nil)
 		}
 		ids[site.ID] = true
-		domains[site.Domain] = true
+		domains[strings.ToLower(site.Domain)] = true
 		if site.Enabled && !s.Config.Services.Nginx.Installed {
 			return newStateError("nginx_not_installed", "enabled site requires nginx", nil)
 		}
@@ -250,10 +310,20 @@ func ValidateSnapshots(candidates ...ConfigSnapshot) error {
 }
 func NormalizePHPVersion(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
-	if !regexp.MustCompile(`^[0-9]+\.[0-9]+$`).MatchString(raw) {
+	if !phpVersionPattern.MatchString(raw) {
 		return "", newStateError("invalid_php", "php version must be major.minor", nil)
 	}
 	return raw, nil
+}
+func validateDirectory(path, name string) error {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return newStateError("invalid_path", name+" must be an existing directory", err)
+	}
+	if info.Mode().Perm()&0111 == 0 || info.Mode().Perm()&0444 == 0 {
+		return newStateError("invalid_path", name+" must be readable and traversable", nil)
+	}
+	return nil
 }
 func isValidMariaDBName(n string) bool {
 	return regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_]{0,63}$`).MatchString(n)

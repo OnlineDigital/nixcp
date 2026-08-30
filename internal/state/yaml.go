@@ -21,6 +21,9 @@ func decodeStrict(raw []byte, out any) error {
 	if err := dec.Decode(&node); err != nil {
 		return newStateError("invalid_yaml", "invalid YAML", err)
 	}
+	if node.Kind != yaml.DocumentNode || len(node.Content) != 1 || node.Content[0].Kind != yaml.MappingNode {
+		return newStateError("invalid_yaml", "YAML document must be a mapping", nil)
+	}
 	if err := rejectDuplicateKeys(&node); err != nil {
 		return newStateError("duplicate_key", err.Error(), err)
 	}
@@ -34,6 +37,9 @@ func decodeStrict(raw []byte, out any) error {
 	strict.KnownFields(true)
 	if err := strict.Decode(out); err != nil {
 		return newStateError("invalid_yaml", "invalid YAML schema", err)
+	}
+	if err := strict.Decode(&struct{}{}); err != io.EOF {
+		return newStateError("invalid_yaml", "YAML must contain one document", err)
 	}
 	if err := dec.Decode(&struct{}{}); err != io.EOF {
 		return newStateError("invalid_yaml", "YAML must contain one document", err)

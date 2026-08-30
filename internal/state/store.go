@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -22,19 +24,30 @@ type Store struct{ Root string }
 func NewStore(home string) *Store   { return &Store{Root: filepath.Join(home, ".nixcp")} }
 func (s *Store) ConfigPath() string { return filepath.Join(s.Root, "config.yaml") }
 func (s *Store) SitesPath() string  { return filepath.Join(s.Root, "sites") }
+
 func (s *Store) Initialize(cfg ConfigSnapshot) error {
 	cfg.Canonicalize()
 	if err := ValidateConfig(cfg); err != nil {
 		return err
 	}
-	for _, d := range []string{s.Root, s.SitesPath(), filepath.Join(s.Root, "generated"), filepath.Join(s.Root, "shell"), filepath.Join(s.Root, "backups"), filepath.Join(s.Root, "transactions"), filepath.Join(s.Root, "nginx-templates")} {
+	for _, d := range s.managedDirs() {
 		if err := ensurePrivateDir(d); err != nil {
 			return err
 		}
 	}
 	return s.WriteSnapshot(Snapshot{Config: cfg})
 }
+
+func (s *Store) managedDirs() []string {
+	return []string{s.Root, s.SitesPath(), filepath.Join(s.Root, "generated"), filepath.Join(s.Root, "shell"), filepath.Join(s.Root, "backups"), filepath.Join(s.Root, "transactions"), filepath.Join(s.Root, "nginx-templates")}
+}
+
+// Load is read-only. It validates every managed state file before returning a
+// snapshot, and never migrates or canonicalizes files on disk.
 func (s *Store) Load() (Snapshot, error) {
+	if err := checkPrivateDir(s.Root); err != nil {
+		return Snapshot{}, err
+	}
 	if err := checkRegularPrivate(s.ConfigPath()); err != nil {
 		return Snapshot{}, err
 	}
@@ -46,20 +59,29 @@ func (s *Store) Load() (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	entries, err := os.ReadDir(s.SitesPath())
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Snapshot{Config: cfg}, nil
-		}
+	if err := checkOwnedBy(s.Root, cfg.Owner.UID); err != nil {
 		return Snapshot{}, err
 	}
-	var sites []SiteConfig
+	if err := checkOwnedBy(s.ConfigPath(), cfg.Owner.UID); err != nil {
+		return Snapshot{}, err
+	}
+	if err := checkPrivateDir(s.SitesPath()); err != nil {
+		return Snapshot{}, err
+	}
+	entries, err := os.ReadDir(s.SitesPath())
+	if err != nil {
+		return Snapshot{}, err
+	}
+	sites := make([]SiteConfig, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" {
-			continue
+			return Snapshot{}, newStateError("unsafe_state_path", "sites directory contains an unmanaged entry", nil)
 		}
 		path := filepath.Join(s.SitesPath(), e.Name())
 		if err := checkRegularPrivate(path); err != nil {
+			return Snapshot{}, err
+		}
+		if err := checkOwnedBy(path, cfg.Owner.UID); err != nil {
 			return Snapshot{}, err
 		}
 		b, err := os.ReadFile(path)
@@ -70,77 +92,217 @@ func (s *Store) Load() (Snapshot, error) {
 		if err != nil {
 			return Snapshot{}, err
 		}
+		if e.Name() != site.ID+".yaml" {
+			return Snapshot{}, newStateError("invalid_site_filename", "site manifest filename must equal its id", nil)
+		}
 		sites = append(sites, site)
 	}
 	sort.Slice(sites, func(i, j int) bool { return sites[i].ID < sites[j].ID })
 	snap := Snapshot{Config: cfg, Sites: sites}
 	return snap, snap.Validate()
 }
-func (s *Store) WriteSnapshot(snap Snapshot) error {
+
+// WriteSnapshot validates the complete candidate before publishing any file.
+// Each individual publication is fsync+rename atomic. If a later publication
+// fails, original state files are restored from private in-memory copies; this
+// provides all-or-nothing snapshot semantics until Stage 5 adds a durable
+// transaction journal around rebuilds.
+func (s *Store) WriteSnapshot(snap Snapshot) (err error) {
+	snap.Canonicalize()
 	if err := snap.Validate(); err != nil {
 		return err
 	}
-	if err := ensurePrivateDir(s.Root); err != nil {
+	for _, d := range []string{s.Root, s.SitesPath()} {
+		if err := ensurePrivateDir(d); err != nil {
+			return err
+		}
+	}
+	if err := checkOwnedBy(s.Root, snap.Config.Owner.UID); err != nil {
 		return err
 	}
-	if err := ensurePrivateDir(s.SitesPath()); err != nil {
+	before, hadBefore, err := s.captureStateFiles()
+	if err != nil {
 		return err
 	}
+	published := false
+	defer func() {
+		if err != nil && published {
+			_ = s.restoreStateFiles(before, hadBefore)
+		}
+	}()
+	files := map[string][]byte{}
 	cfg, err := marshalCanonical(snap.Config)
 	if err != nil {
 		return err
 	}
-	if err := atomicWrite(s.ConfigPath(), cfg); err != nil {
+	files[s.ConfigPath()] = cfg
+	for _, site := range snap.Sites {
+		b, encodeErr := marshalCanonical(site)
+		if encodeErr != nil {
+			return encodeErr
+		}
+		files[filepath.Join(s.SitesPath(), site.ID+".yaml")] = b
+	}
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		if err = atomicWrite(path, files[path]); err != nil {
+			return err
+		}
+		published = true
+	}
+	entries, err := os.ReadDir(s.SitesPath())
+	if err != nil {
 		return err
 	}
-	desired := map[string]bool{}
-	for _, site := range snap.Sites {
-		b, err := marshalCanonical(site)
-		if err != nil {
+	for _, e := range entries {
+		path := filepath.Join(s.SitesPath(), e.Name())
+		if _, keep := files[path]; keep {
+			continue
+		}
+		if e.IsDir() || filepath.Ext(e.Name()) != ".yaml" || checkRegularPrivate(path) != nil {
+			return newStateError("unsafe_state_path", "refusing to remove unmanaged site entry", nil)
+		}
+		if err = os.Remove(path); err != nil {
 			return err
 		}
-		name := site.ID + ".yaml"
-		desired[name] = true
-		if err := atomicWrite(filepath.Join(s.SitesPath(), name), b); err != nil {
+		published = true
+	}
+	return syncDir(s.SitesPath())
+}
+
+func (s *Store) captureStateFiles() (map[string][]byte, map[string]bool, error) {
+	result, exists := map[string][]byte{}, map[string]bool{}
+	for _, dir := range []string{s.Root, s.SitesPath()} {
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, e := range entries {
+			if dir == s.Root && e.Name() != "config.yaml" {
+				continue
+			}
+			if dir == s.SitesPath() && filepath.Ext(e.Name()) != ".yaml" {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			if err := checkRegularPrivate(path); err != nil {
+				return nil, nil, err
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return nil, nil, err
+			}
+			result[path], exists[path] = b, true
+		}
+	}
+	return result, exists, nil
+}
+func (s *Store) restoreStateFiles(files map[string][]byte, exists map[string]bool) error {
+	for path, data := range files {
+		if err := atomicWrite(path, data); err != nil {
 			return err
 		}
 	}
-	entries, _ := os.ReadDir(s.SitesPath())
+	entries, err := os.ReadDir(s.SitesPath())
+	if err != nil {
+		return err
+	}
 	for _, e := range entries {
-		if filepath.Ext(e.Name()) == ".yaml" && !desired[e.Name()] {
-			if err := os.Remove(filepath.Join(s.SitesPath(), e.Name())); err != nil {
+		path := filepath.Join(s.SitesPath(), e.Name())
+		if filepath.Ext(e.Name()) == ".yaml" && !exists[path] {
+			if err := os.Remove(path); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
-}
-func ensurePrivateDir(path string) error {
-	info, err := os.Lstat(path)
-	if err == nil {
-		if !info.IsDir() || info.Mode()&0077 != 0 {
-			return newStateError("unsafe_state_path", "managed directory must be private and not symlink", nil)
-		}
-		return nil
+	if !exists[s.ConfigPath()] {
+		_ = os.Remove(s.ConfigPath())
 	}
-	if !errors.Is(err, os.ErrNotExist) {
+	return syncDir(s.SitesPath())
+}
+
+func (s *Store) Canonicalize() error {
+	snap, err := s.Load()
+	if err != nil {
 		return err
 	}
-	return os.MkdirAll(path, dirMode)
+	return s.WriteSnapshot(snap)
+}
+func (s *Store) MigrateForWrite() error {
+	snap, err := s.Load()
+	if err != nil {
+		return err
+	}
+	if _, err := s.BackupForMigration(); err != nil {
+		return err
+	}
+	return s.WriteSnapshot(snap)
+}
+
+func (s *Snapshot) Canonicalize() {
+	s.Config.Canonicalize()
+	for i := range s.Sites {
+		s.Sites[i].Canonicalize()
+	}
+	sort.Slice(s.Sites, func(i, j int) bool { return s.Sites[i].ID < s.Sites[j].ID })
+}
+func ensurePrivateDir(path string) error {
+	if err := os.MkdirAll(path, dirMode); err != nil {
+		return err
+	}
+	return checkPrivateDir(path)
+}
+func checkPrivateDir(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&0077 != 0 {
+		return newStateError("unsafe_state_path", "managed directory must be a private non-symlink directory", nil)
+	}
+	return nil
 }
 func checkRegularPrivate(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Mode()&0077 != 0 {
+	if !info.Mode().IsRegular() || info.Mode().Perm() != fileMode {
 		return newStateError("unsafe_state_path", "managed file must be regular and mode 0600", nil)
+	}
+	return nil
+}
+func checkOwnedBy(path string, uid int) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if int(stat.Uid) != uid {
+		return newStateError("unsafe_state_path", "managed path has unexpected owner", nil)
 	}
 	return nil
 }
 func atomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := ensurePrivateDir(dir); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		if err := checkRegularPrivate(path); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	tmp, err := os.CreateTemp(dir, ".nixcp-")
@@ -150,21 +312,32 @@ func atomicWrite(path string, data []byte) error {
 	name := tmp.Name()
 	defer os.Remove(name)
 	if err := tmp.Chmod(fileMode); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(name, path)
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+func syncDir(path string) error {
+	d, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 func marshalCanonical(v any) ([]byte, error) {
 	var b bytes.Buffer
@@ -176,5 +349,9 @@ func marshalCanonical(v any) ([]byte, error) {
 	if err := enc.Close(); err != nil {
 		return nil, err
 	}
-	return b.Bytes(), nil
+	out := b.Bytes()
+	if !strings.HasSuffix(string(out), "\n") {
+		out = append(out, '\n')
+	}
+	return out, nil
 }

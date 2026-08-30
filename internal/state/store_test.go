@@ -7,7 +7,7 @@ import (
 )
 
 func validConfig(home string) ConfigSnapshot {
-	return ConfigSnapshot{SchemaVersion: 1, Owner: Owner{Username: "u", UID: 1, Group: "g", GID: 1, Home: home}, Platform: Platform{System: "x86_64-linux"}, Rebuild: RebuildConfig{Mode: "traditional"}, Services: ServiceStates{Nginx: ServiceConfig{DesiredState: "stopped"}, MariaDB: ServiceConfig{DesiredState: "stopped"}, Redis: ServiceConfig{DesiredState: "stopped"}}}
+	return ConfigSnapshot{SchemaVersion: 1, Owner: Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home}, Platform: Platform{System: "x86_64-linux"}, Rebuild: RebuildConfig{Mode: "traditional"}, Services: ServiceStates{Nginx: ServiceConfig{DesiredState: "stopped"}, MariaDB: ServiceConfig{DesiredState: "stopped"}, Redis: ServiceConfig{DesiredState: "stopped"}}}
 }
 func TestStoreRoundTripAndRejectsUnsafeFile(t *testing.T) {
 	home := t.TempDir()

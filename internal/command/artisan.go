@@ -1,10 +1,8 @@
 package command
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
@@ -30,9 +28,13 @@ func newArtisanCommand(runtime Runtime) *cobra.Command {
 		if err != nil {
 			return apperrors.New("no_active_php_version", err.Error(), "Run: ncp php use <version>", apperrors.ExitCodePrecond)
 		}
-		res, err := runtime.Runner.Run(cmd.Context(), &execx.Command{Name: php.Binary(v), Args: append([]string{"./artisan"}, args...), Dir: cwd, Env: phpEnv(os.Environ(), v)})
-		if err != nil {
-			return apperrors.New("artisan_execution_failed", strings.TrimSpace(res.Stderr), fmt.Sprintf("Artisan exit code: %d", res.ExitCode), apperrors.ExitCodeRuntime)
+		// tinker is artisan's interactive REPL: attach the real TTY so the
+		// user gets a prompt instead of a closed stdin.
+		interactive := len(args) > 0 && args[0] == "tinker"
+		argv := append([]string{"./artisan"}, args...)
+		res, err := runtime.Runner.Run(cmd.Context(), &execx.Command{Name: php.Binary(v), Args: argv, Dir: cwd, Env: phpEnv(os.Environ(), v), Interactive: interactive})
+		if err != nil || res.ExitCode != 0 {
+			return processFailure("artisan_execution_failed", "Artisan", argv, res, err, apperrors.ExitCodeRuntime)
 		}
 		return nil
 	}}

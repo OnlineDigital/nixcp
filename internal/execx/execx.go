@@ -2,10 +2,13 @@ package execx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -32,7 +35,15 @@ type Command struct {
 	Env       []string
 	StdoutMax int
 	StderrMax int
+	// Interactive attaches the process to the caller's terminal: stdin,
+	// stdout and stderr stream through unbounded instead of being captured.
+	// Use for user-facing REPLs (e.g. `artisan tinker`) that need a TTY.
+	// Output is NOT captured in interactive mode; the exit code still is.
+	Interactive bool
 }
+
+// IsInteractive reports whether the command needs a TTY attached.
+func (c *Command) IsInteractive() bool { return c != nil && c.Interactive }
 
 // Runner executes a command without shell interpretation.
 type Runner interface {
@@ -84,6 +95,25 @@ func (r *RealRunner) Run(ctx context.Context, cmd *Command) (Result, error) {
 		execCmd.Env = cmd.Env
 	}
 
+	if cmd.IsInteractive() {
+		// TTY passthrough: the child inherits the real terminal so interactive
+		// tools (artisan tinker) behave exactly as if invoked directly.
+		// Signals reach it through the process group; its exit code is
+		// propagated verbatim via ProcessExitError.
+		execCmd.Stdin = os.Stdin
+		execCmd.Stdout = os.Stdout
+		execCmd.Stderr = os.Stderr
+		runErr := execCmd.Run()
+		res := Result{Cmd: append([]string{cmd.Name}, cmd.Args...), ExitCode: exitCodeFromError(runErr), DurationMs: time.Since(started).Milliseconds()}
+		if ctx.Err() == context.DeadlineExceeded {
+			res.TimedOut = true
+		}
+		if runErr != nil {
+			return res, &ProcessExitError{Cmd: res.Cmd, ExitCode: res.ExitCode, Signal: signalFromError(runErr), Err: runErr}
+		}
+		return res, nil
+	}
+
 	bufOut := &boundedBuffer{limit: stdoutLimit}
 	bufErr := &boundedBuffer{limit: stderrLimit}
 	execCmd.Stdout = bufOut
@@ -101,8 +131,10 @@ func (r *RealRunner) Run(ctx context.Context, cmd *Command) (Result, error) {
 	if ctx.Err() == context.DeadlineExceeded {
 		res.TimedOut = true
 	}
-
-	return res, err
+	if err != nil {
+		return res, &ProcessExitError{Cmd: res.Cmd, ExitCode: res.ExitCode, Signal: signalFromError(err), Stderr: res.Stderr, Err: err}
+	}
+	return res, nil
 }
 
 func exitCodeFromError(err error) int {
@@ -119,12 +151,62 @@ func exitCodeFromError(err error) int {
 	return 1
 }
 
+// signalFromError reports the signal that killed the child, if any.
+func signalFromError(err error) string {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return status.Signal().String()
+		}
+	}
+	return ""
+}
+
+// ProcessExitError is returned when a child process exits with a non-zero
+// status or is terminated by a signal. It carries the exit code so CLI
+// commands can propagate it verbatim and surface bounded stderr
+// diagnostics in JSON envelopes.
+type ProcessExitError struct {
+	Cmd      []string
+	ExitCode int
+	Stderr   string
+	Signal   string
+	Err      error
+}
+
+func (e *ProcessExitError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	if e.Signal != "" {
+		return fmt.Sprintf("command %q exited via signal %s", e.Cmd, e.Signal)
+	}
+	return fmt.Sprintf("command %q exited with code %d", e.Cmd, e.ExitCode)
+}
+
+func (e *ProcessExitError) Unwrap() error { return e.Err }
+
+// Diagnostic renders a one-line structured diagnostic for JSON envelopes.
+func (e *ProcessExitError) Diagnostic() string {
+	if e == nil {
+		return ""
+	}
+	argv := "[" + strings.Join(e.Cmd, " ") + "]"
+	if e.Signal != "" {
+		return fmt.Sprintf("%s exited via signal %s", argv, e.Signal)
+	}
+	return fmt.Sprintf("%s exited with code %d", argv, e.ExitCode)
+}
+
 // FakeRunner is deterministic and side-effect-free for tests.
 type FakeRunner struct {
 	// If set, handler decides output and error per invocation.
 	Handle func(cmd *Command) (Result, error)
 	// Runs contains all commands executed.
 	Runs []*Command
+	// Contexts records the context passed to each Run, aligned with Runs;
+	// tests use it to assert deadline/cancellation propagation.
+	Contexts []context.Context
 }
 
 func (f *FakeRunner) Run(ctx context.Context, cmd *Command) (Result, error) {
@@ -133,9 +215,7 @@ func (f *FakeRunner) Run(ctx context.Context, cmd *Command) (Result, error) {
 	}
 	copyCmd := *cmd
 	f.Runs = append(f.Runs, &copyCmd)
-	if ctx != nil {
-		_ = ctx
-	}
+	f.Contexts = append(f.Contexts, ctx)
 	if f.Handle != nil {
 		return f.Handle(cmd)
 	}

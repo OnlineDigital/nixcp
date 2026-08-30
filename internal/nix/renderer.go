@@ -49,7 +49,7 @@ func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 		b.WriteString("  services.mysql.settings.mysqld.bind-address = \"127.0.0.1\";\n")
 	})
 	renderServicePolicy(b, "redis-nixcp", c.Services.Redis, func() {
-		b.WriteString("  services.redis.servers.nixcp = { enable = true; bind = \"127.0.0.1\"; port = 6379; };\n")
+		b.WriteString("  services.redis.servers.nixcp = { enable = true; bind = \"127.0.0.1\"; port = 6379; protectedMode = true; }\n")
 	})
 	if len(c.MariaDBRegistry.Databases) > 0 {
 		values := make([]string, 0, len(c.MariaDBRegistry.Databases))

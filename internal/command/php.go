@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/user"
@@ -18,7 +19,7 @@ import (
 )
 
 func newPHPCommand(runtime Runtime) *cobra.Command {
-	cmd := &cobra.Command{Use: "php", Short: "PHP operations", Args: cobra.ArbitraryArgs, DisableFlagParsing: true, RunE: func(c *cobra.Command, a []string) error { return dispatchPHP(c, runtime, a) }}
+	cmd := &cobra.Command{Use: "php", Short: "PHP operations", Args: cobra.ArbitraryArgs, DisableFlagParsing: true, RunE: func(c *cobra.Command, a []string) error { return dispatchPHP(c, runtime, passthroughArgs(c, a)) }}
 	cmd.AddCommand(&cobra.Command{Use: "install <version>", Short: "Install supported PHP version", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return mutatePHP(c, runtime, "install", a[0]) }})
 	ext := &cobra.Command{Use: "ext", Short: "Nixpkgs PHP extensions"}
 	ext.AddCommand(&cobra.Command{Use: "install <name>", Short: "Install nixpkgs PHP extension", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return mutatePHP(c, runtime, "extension", a[0]) }})
@@ -47,16 +48,11 @@ func dispatchPHP(cmd *cobra.Command, runtime Runtime, args []string) error {
 			return mutatePHP(cmd, runtime, "global", args[1])
 		}
 		if len(args) == 3 && strings.HasPrefix(args[2], "--shell-emit=") {
-			v, err := php.NormalizeVersion(args[1])
-			if err != nil {
-				return err
-			}
-			code, err := shellActivation(strings.TrimPrefix(args[2], "--shell-emit="), v)
-			if err != nil {
-				return err
-			}
-			_, err = fmt.Fprint(cmd.OutOrStdout(), code)
-			return err
+			// Shell-emit is the internal wrapper protocol. Route through the
+			// same validation and .php-version write as plain `use`, but print
+			// ONLY evaluable shell code on stdout (the wrapper evals it
+			// verbatim after checking the exit code).
+			return useLocalPHPWithShell(cmd, runtime, args[1], strings.TrimPrefix(args[2], "--shell-emit="))
 		}
 		if len(args) == 2 {
 			return useLocalPHP(cmd, runtime, args[1])
@@ -155,6 +151,14 @@ func emitPHPResult(cmd *cobra.Command, action, value string, changed bool, warni
 	return nil
 }
 func useLocalPHP(cmd *cobra.Command, runtime Runtime, raw string) error {
+	shell, _ := cmd.Flags().GetString("shell-emit")
+	return useLocalPHPWithShell(cmd, runtime, raw, shell)
+}
+
+// useLocalPHPWithShell validates the version, writes .php-version, and when
+// shell is non-empty emits ONLY the evaluable shell activation code (the
+// ncp() wrapper protocol); otherwise it emits the normal command result.
+func useLocalPHPWithShell(cmd *cobra.Command, runtime Runtime, raw, shell string) error {
 	v, err := php.NormalizeVersion(raw)
 	if err != nil {
 		return apperrors.New("unsupported_php", err.Error(), "", apperrors.ExitCodePrecond)
@@ -173,7 +177,6 @@ func useLocalPHP(cmd *cobra.Command, runtime Runtime, raw string) error {
 	if err := writePHPMarker(filepath.Join(cwd, ".php-version"), v); err != nil {
 		return apperrors.New("php_version_write_failed", err.Error(), "", apperrors.ExitCodeRuntime)
 	}
-	shell, _ := cmd.Flags().GetString("shell-emit")
 	if shell != "" {
 		code, err := shellActivation(shell, v)
 		if err != nil {
@@ -216,14 +219,48 @@ func runPHP(cmd *cobra.Command, runtime Runtime, args []string) error {
 	if err != nil {
 		return apperrors.New("no_active_php_version", err.Error(), "Run: ncp php use <version>", apperrors.ExitCodePrecond)
 	}
-	res, e := runtime.Runner.Run(cmd.Context(), &execx.Command{Name: php.Binary(v), Args: args, Dir: cwd, Env: phpEnv(os.Environ(), v)})
-	if e != nil {
-		return apperrors.New("php_execution_failed", strings.TrimSpace(res.Stderr), "PHP exit code: "+fmt.Sprint(res.ExitCode), apperrors.ExitCodeRuntime)
+	interactive := len(args) > 0 && (args[0] == "-a" || args[0] == "--interactive")
+	c := &execx.Command{Name: php.Binary(v), Args: args, Dir: cwd, Env: phpEnv(os.Environ(), v), Interactive: interactive}
+	res, e := runtime.Runner.Run(cmd.Context(), c)
+	if e != nil || res.ExitCode != 0 {
+		return processFailure("php_execution_failed", "PHP", append([]string{php.Binary(v)}, args...), res, e, apperrors.ExitCodeRuntime)
 	}
 	return nil
 }
+
+// processFailure wraps a child-process failure as a stable AppError while
+// propagating the child's own exit code (and signal, when applicable) so
+// `ncp php`/`ncp artisan` behave like the wrapped tool in scripts.
+func processFailure(code, label string, argv []string, res execx.Result, runErr error, fallback apperrors.ExitCode) error {
+	pe := apperrors.ProcessExit{ExitCode: res.ExitCode, Command: strings.Join(argv, " "), Stderr: strings.TrimSpace(res.Stderr)}
+	var pex *execx.ProcessExitError
+	if errors.As(runErr, &pex) {
+		pe.ExitCode = pex.ExitCode
+		pe.Stderr = strings.TrimSpace(pex.Stderr)
+		pe.Signal = pex.Signal
+	}
+	if pe.ExitCode == 0 {
+		// The child reported success but the runner errored; keep it a failure.
+		pe.ExitCode = 1
+	}
+	hint := fmt.Sprintf("%s exit code: %d", label, pe.ExitCode)
+	if pe.Signal != "" {
+		hint = fmt.Sprintf("%s terminated by signal %s", label, pe.Signal)
+	}
+	return apperrors.New(code, pe.Stderr, hint, fallback).WithProcessExit(pe)
+}
+
+// phpEnv returns a copy of env with exactly one NIXCP_PHP_VERSION and one
+// NIXCP_PHP_BIN entry (stale values from earlier activations are replaced,
+// not duplicated).
 func phpEnv(env []string, v string) []string {
-	out := append([]string(nil), env...)
+	out := make([]string, 0, len(env)+2)
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "NIXCP_PHP_VERSION=") || strings.HasPrefix(kv, "NIXCP_PHP_BIN=") {
+			continue
+		}
+		out = append(out, kv)
+	}
 	out = append(out, "NIXCP_PHP_VERSION="+v, "NIXCP_PHP_BIN="+filepath.Dir(php.Binary(v)))
 	return out
 }

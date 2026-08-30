@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"os/user"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/state"
 )
 
 func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
@@ -221,4 +224,64 @@ func TestCommandUsesNoPromptInJSON(t *testing.T) {
 		// conservative check: no prompt-like helpers should appear.
 		t.Fatalf("did not expect prompt words in json output")
 	}
+}
+
+func TestTimeoutFlagBindsDeadlineToInvocationContext(t *testing.T) {
+	home := t.TempDir()
+	runner := &execx.FakeRunner{}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(runner))
+	if err != nil {
+		t.Fatalf("failed to build app: %v", err)
+	}
+	store := state.NewStore(home)
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	app.Root.SetArgs([]string{"--timeout", "5s", "php", "-v"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("php exit %d", code)
+	}
+	if len(runner.Contexts) == 0 {
+		t.Fatal("no command ran")
+	}
+	d, ok := runner.Contexts[0].Deadline()
+	if !ok {
+		t.Fatal("--timeout did not install a deadline on the command context")
+	}
+	if remaining := time.Until(d); remaining <= 0 || remaining > 5*time.Second {
+		t.Fatalf("unexpected deadline remaining: %v", remaining)
+	}
+}
+
+func TestDbgPreRunFlagVisibility(t *testing.T) {
+	home := t.TempDir()
+	app, err := New(context.Background(), WithStateHome(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	u, _ := user.Current()
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"--timeout", "5s", "php", "-v"})
+	_ = app.Execute()
+	phpCmd, _, _ := app.Root.Find([]string{"php"})
+	if phpCmd == nil {
+		t.Fatal("no php cmd")
+	}
+	d, derr := phpCmd.Flags().GetDuration("timeout")
+	rd, _ := app.Root.Flags().GetDuration("timeout")
+	t.Logf("php flag=%v err=%v root flag=%v", d, derr, rd)
 }

@@ -183,6 +183,7 @@ type Manager struct {
 
 type Request struct {
 	Files           map[string][]byte
+	Deletes         []string // managed paths removed only after a successful candidate build
 	CandidateModule string
 	Affected        []string
 }
@@ -194,7 +195,7 @@ type Result struct {
 }
 
 func (m *Manager) Apply(ctx context.Context, r Request) (Result, error) {
-	if len(r.Files) == 0 {
+	if len(r.Files) == 0 && len(r.Deletes) == 0 {
 		return Result{Changed: false, Phase: PhaseCommitted}, nil
 	}
 	if err := m.valid(); err != nil {
@@ -211,11 +212,15 @@ func (m *Manager) Apply(ctx context.Context, r Request) (Result, error) {
 	if err = validateFiles(r.Files); err != nil {
 		return Result{}, err
 	}
-	old, err := m.capture(r.Files)
+	if err = validateDeletes(r.Deletes); err != nil {
+		return Result{}, err
+	}
+	managed := managedFiles(r.Files, r.Deletes)
+	old, err := m.capture(managed)
 	if err != nil {
 		return Result{}, err
 	}
-	if equalFiles(old, r.Files) {
+	if equalFiles(old, r.Files) && deletesAbsent(old, r.Deletes) {
 		return Result{Changed: false, Phase: PhaseCommitted}, nil
 	}
 	id := m.id()
@@ -223,7 +228,11 @@ func (m *Manager) Apply(ctx context.Context, r Request) (Result, error) {
 	if err = os.MkdirAll(filepath.Join(dir, "stage"), 0700); err != nil {
 		return Result{}, err
 	}
-	j := Journal{ID: id, Phase: PhaseCreated, OldHashes: hashes(old), CandidateHashes: hashes(r.Files), AffectedResources: append([]string(nil), r.Affected...), StartedAt: m.now().UTC()}
+	candidateHashes := hashes(r.Files)
+	for _, p := range r.Deletes {
+		candidateHashes[p] = ""
+	}
+	j := Journal{ID: id, Phase: PhaseCreated, OldHashes: hashes(old), CandidateHashes: candidateHashes, AffectedResources: append([]string(nil), r.Affected...), StartedAt: m.now().UTC()}
 	if err = m.writeJournal(dir, &j); err != nil {
 		return Result{}, err
 	}
@@ -256,26 +265,26 @@ func (m *Manager) Apply(ctx context.Context, r Request) (Result, error) {
 	if err = m.writeJournal(dir, &j); err != nil {
 		return Result{}, err
 	}
-	if err = m.publish(r.Files); err != nil {
-		return Result{}, m.rollback(ctx, dir, &j, old, r.Files, err)
+	if err = m.publish(r.Files, r.Deletes); err != nil {
+		return Result{}, m.rollback(ctx, dir, &j, old, managed, err)
 	}
 	j.Phase = PhasePublished
 	if err = m.writeJournal(dir, &j); err != nil {
-		return Result{}, m.rollback(ctx, dir, &j, old, r.Files, err)
+		return Result{}, m.rollback(ctx, dir, &j, old, managed, err)
 	}
 	if err = m.Rebuilder.Switch(ctx); err != nil {
-		return Result{}, m.rollback(ctx, dir, &j, old, r.Files, err)
+		return Result{}, m.rollback(ctx, dir, &j, old, managed, err)
 	}
 	j.Phase = PhaseSwitched
 	if err = m.writeJournal(dir, &j); err != nil {
-		return Result{}, m.rollback(ctx, dir, &j, old, r.Files, err)
+		return Result{}, m.rollback(ctx, dir, &j, old, managed, err)
 	}
 	if err = m.Health.Check(ctx, r.Affected); err != nil {
-		return Result{}, m.rollback(ctx, dir, &j, old, r.Files, err)
+		return Result{}, m.rollback(ctx, dir, &j, old, managed, err)
 	}
 	j.Phase = PhaseVerified
 	if err = m.writeJournal(dir, &j); err != nil {
-		return Result{}, m.rollback(ctx, dir, &j, old, r.Files, err)
+		return Result{}, m.rollback(ctx, dir, &j, old, managed, err)
 	}
 	j.Phase = PhaseCommitted
 	if err = m.writeJournal(dir, &j); err != nil {
@@ -359,6 +368,39 @@ func (m *Manager) now() time.Time {
 func safeRelative(p string) bool {
 	return p != "" && !filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.HasPrefix(p, ".."+string(filepath.Separator)) && p != ".."
 }
+func validateDeletes(deletes []string) error {
+	seen := map[string]struct{}{}
+	for _, p := range deletes {
+		if !safeRelative(p) || p == "config.yaml" || p == "generated/nixcp-module.nix" || !strings.HasPrefix(p, "sites/") || filepath.Ext(p) != ".yaml" {
+			return fmt.Errorf("unsafe managed delete path %q", p)
+		}
+		if _, ok := seen[p]; ok {
+			return fmt.Errorf("duplicate managed delete path %q", p)
+		}
+		seen[p] = struct{}{}
+	}
+	return nil
+}
+func managedFiles(files map[string][]byte, deletes []string) map[string][]byte {
+	out := make(map[string][]byte, len(files)+len(deletes))
+	for p, b := range files {
+		out[p] = b
+	}
+	for _, p := range deletes {
+		if _, ok := out[p]; !ok {
+			out[p] = nil
+		}
+	}
+	return out
+}
+func deletesAbsent(old map[string][]byte, deletes []string) bool {
+	for _, p := range deletes {
+		if _, ok := old[p]; ok {
+			return false
+		}
+	}
+	return true
+}
 func validateFiles(files map[string][]byte) error {
 	for p := range files {
 		if !safeRelative(p) {
@@ -431,9 +473,14 @@ func (m *Manager) readFiles(base string) (map[string][]byte, error) {
 	})
 	return out, err
 }
-func (m *Manager) publish(files map[string][]byte) error {
+func (m *Manager) publish(files map[string][]byte, deletes []string) error {
 	for p, b := range files {
 		if err := writeAtomic(filepath.Join(m.Root, p), b); err != nil {
+			return err
+		}
+	}
+	for _, p := range deletes {
+		if err := os.Remove(filepath.Join(m.Root, p)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
@@ -447,7 +494,7 @@ func (m *Manager) restore(old, candidate map[string][]byte) error {
 			}
 		}
 	}
-	return m.publish(old)
+	return m.publish(old, nil)
 }
 func filesFromHashes(h map[string]string) map[string][]byte {
 	out := map[string][]byte{}

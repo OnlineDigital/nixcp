@@ -34,7 +34,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	renderServices(&b, s.Config)
 	renderPHP(&b, s.Config)
 	for _, site := range sortedSites(s.Sites) {
-		renderSite(&b, site)
+		renderSite(&b, site, s.Config.Owner.Username)
 	}
 	b.WriteString("}\n")
 	return []byte(b.String()), nil
@@ -51,6 +51,13 @@ func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 	renderServicePolicy(b, "redis-nixcp", c.Services.Redis, func() {
 		b.WriteString("  services.redis.servers.nixcp = { enable = true; bind = \"127.0.0.1\"; port = 6379; };\n")
 	})
+	if len(c.MariaDBRegistry.Databases) > 0 {
+		values := make([]string, 0, len(c.MariaDBRegistry.Databases))
+		for _, database := range c.MariaDBRegistry.Databases {
+			values = append(values, nixString(database))
+		}
+		fmt.Fprintf(b, "  services.mysql.ensureDatabases = [ %s ];\n", strings.Join(values, " "))
+	}
 }
 
 // Standard NixOS modules keep package/configuration available when enabled.
@@ -83,21 +90,29 @@ func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
 	}
 }
 
-func renderSite(b *strings.Builder, s state.SiteConfig) {
+func renderSite(b *strings.Builder, s state.SiteConfig, owner string) {
 	if !s.Enabled {
 		return
 	}
-	// NixCP owns the complete virtual host boundary. Handler content is data,
-	// not Nix source, and therefore cannot escape its Nix string context.
+	entry := php.Catalog[s.PHP]
+	pool := "nixcp-" + s.ID
+	socket := "/run/nixcp/php-fpm/" + s.ID + ".sock"
+	// Each site gets an isolated pool and a private Unix socket; Nginx is the
+	// only peer allowed to reach it. The vhost boundary remains HTTP-only.
+	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = pkgs.%s; settings = { listen = %s; \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; }; };\n", nixString(pool), nixString(owner), nixString(owner), entry.Nixpkgs, nixString(socket))
 	fmt.Fprintf(b, "  services.nginx.virtualHosts.%s = {\n", nixString(s.Domain))
 	b.WriteString("    listen = [{ addr = \"0.0.0.0\"; port = 80; }];\n")
 	fmt.Fprintf(b, "    root = %s;\n", nixString(s.DocumentRoot))
 	b.WriteString("    extraConfig = \"\";\n")
-	if s.Nginx.Handler.Type == "custom" && s.Nginx.Handler.Content != "" {
-		fmt.Fprintf(b, "    locations.\\\"/\\\".extraConfig = %s;\n", nixString(s.Nginx.Handler.Content))
-	} else {
-		fmt.Fprintf(b, "    locations.\\\"/\\\".extraConfig = %s;\n", nixString(templateContent(s.Nginx.Handler.Name)))
+	content := templateContent(s.Nginx.Handler.Name)
+	if s.Nginx.Handler.Type == "custom" {
+		content = s.Nginx.Handler.Content
 	}
+	if s.Nginx.Handler.Type == "generic" {
+		content = "try_files $uri $uri/ =404;"
+	}
+	fmt.Fprintf(b, "    locations.\\\"/\\\".extraConfig = %s;\n", nixString(content))
+	fmt.Fprintf(b, "    locations.\\\"~ \\.php$\\\".extraConfig = %s;\n", nixString("include "+"${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:"+socket+";"))
 	b.WriteString("  };\n")
 }
 

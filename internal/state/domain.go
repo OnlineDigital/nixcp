@@ -119,7 +119,7 @@ func GenerateStableSiteID(domain string, existing map[string]struct{}) string {
 
 func IsTemplateHandler(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "laravel", "wordpress":
+	case "laravel", "wordpress", "generic":
 		return true
 	default:
 		return false

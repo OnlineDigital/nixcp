@@ -351,6 +351,15 @@ func syncDir(path string) error {
 }
 
 // MarshalConfig serializes a validated config document into canonical YAML for transactions.
+// MarshalSite serializes a validated site document for transactions.
+func MarshalSite(site SiteConfig) ([]byte, error) {
+	site.Canonicalize()
+	if err := ValidateSite(site); err != nil {
+		return nil, err
+	}
+	return marshalCanonical(site)
+}
+
 func MarshalConfig(cfg ConfigSnapshot) ([]byte, error) {
 	cfg.Canonicalize()
 	if err := ValidateConfig(cfg); err != nil {

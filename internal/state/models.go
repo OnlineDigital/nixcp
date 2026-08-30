@@ -17,12 +17,13 @@ var siteIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 
 // ConfigSnapshot is config.yaml. Empty strings encode YAML null for nullable fields.
 type ConfigSnapshot struct {
-	SchemaVersion int           `yaml:"schemaVersion"`
-	Owner         Owner         `yaml:"owner"`
-	Platform      Platform      `yaml:"platform"`
-	Rebuild       RebuildConfig `yaml:"rebuild"`
-	Services      ServiceStates `yaml:"services"`
-	PHP           PHPConfig     `yaml:"php"`
+	SchemaVersion   int             `yaml:"schemaVersion"`
+	Owner           Owner           `yaml:"owner"`
+	Platform        Platform        `yaml:"platform"`
+	Rebuild         RebuildConfig   `yaml:"rebuild"`
+	Services        ServiceStates   `yaml:"services"`
+	PHP             PHPConfig       `yaml:"php"`
+	MariaDBRegistry MariaDBRegistry `yaml:"mariadbRegistry,omitempty"`
 }
 
 type Owner struct {
@@ -54,6 +55,9 @@ type PHPConfig struct {
 	Installed     []string `yaml:"installed"`
 	Extensions    []string `yaml:"extensions"`
 	GlobalDefault string   `yaml:"globalDefault,omitempty"`
+}
+type MariaDBRegistry struct {
+	Databases []string `yaml:"databases,omitempty"`
 }
 
 type SiteConfig struct {
@@ -102,12 +106,13 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		GlobalDefault *string  `yaml:"globalDefault"`
 	}
 	type configYAML struct {
-		SchemaVersion int           `yaml:"schemaVersion"`
-		Owner         Owner         `yaml:"owner"`
-		Platform      Platform      `yaml:"platform"`
-		Rebuild       rebuildYAML   `yaml:"rebuild"`
-		Services      ServiceStates `yaml:"services"`
-		PHP           phpYAML       `yaml:"php"`
+		SchemaVersion   int             `yaml:"schemaVersion"`
+		Owner           Owner           `yaml:"owner"`
+		Platform        Platform        `yaml:"platform"`
+		Rebuild         rebuildYAML     `yaml:"rebuild"`
+		Services        ServiceStates   `yaml:"services"`
+		PHP             phpYAML         `yaml:"php"`
+		MariaDBRegistry MariaDBRegistry `yaml:"mariadbRegistry,omitempty"`
 	}
 	var target, globalDefault *string
 	if cfg.Rebuild.Target != "" {
@@ -118,7 +123,7 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		value := cfg.PHP.GlobalDefault
 		globalDefault = &value
 	}
-	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}}, nil
+	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}, cfg.MariaDBRegistry}, nil
 }
 
 func (cfg *ConfigSnapshot) Canonicalize() {
@@ -144,8 +149,12 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 	for i := range cfg.PHP.Extensions {
 		cfg.PHP.Extensions[i] = strings.ToLower(strings.TrimSpace(cfg.PHP.Extensions[i]))
 	}
+	for i := range cfg.MariaDBRegistry.Databases {
+		cfg.MariaDBRegistry.Databases[i] = strings.TrimSpace(cfg.MariaDBRegistry.Databases[i])
+	}
 	sort.Strings(cfg.PHP.Installed)
 	sort.Strings(cfg.PHP.Extensions)
+	sort.Strings(cfg.MariaDBRegistry.Databases)
 }
 func (site *SiteConfig) Canonicalize() {
 	site.ID = strings.TrimSpace(strings.ToLower(site.ID))
@@ -159,7 +168,10 @@ func (site *SiteConfig) Canonicalize() {
 	site.PHP = strings.TrimSpace(site.PHP)
 	site.Nginx.Handler.Type = strings.ToLower(strings.TrimSpace(site.Nginx.Handler.Type))
 	site.Nginx.Handler.Name = strings.ToLower(strings.TrimSpace(site.Nginx.Handler.Name))
-	site.Nginx.Handler.Path = filepath.Clean(site.Nginx.Handler.Path)
+	site.Nginx.Handler.Path = strings.TrimSpace(site.Nginx.Handler.Path)
+	if site.Nginx.Handler.Path != "" {
+		site.Nginx.Handler.Path = filepath.Clean(site.Nginx.Handler.Path)
+	}
 	if site.MariaDB != nil {
 		site.MariaDB.Database = strings.TrimSpace(site.MariaDB.Database)
 	}
@@ -209,6 +221,14 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	if cfg.PHP.GlobalDefault != "" && !contains(cfg.PHP.Installed, cfg.PHP.GlobalDefault) {
 		return newStateError("invalid_global_default", "globalDefault must be installed", nil)
 	}
+	if err := validateUnique(cfg.MariaDBRegistry.Databases, "mariadb database", func(s string) (string, error) {
+		if !isValidMariaDBName(s) {
+			return "", fmt.Errorf("invalid database")
+		}
+		return s, nil
+	}); err != nil {
+		return err
+	}
 	return nil
 }
 func ValidateSite(site SiteConfig) error {
@@ -239,16 +259,19 @@ func ValidateSite(site SiteConfig) error {
 	if site.Nginx.Handler.Type == "template" && !IsTemplateHandler(site.Nginx.Handler.Name) {
 		return newStateError("invalid_handler", "unknown template handler", nil)
 	}
+	if site.Nginx.Handler.Type == "generic" && (site.Nginx.Handler.Name != "" || site.Nginx.Handler.Path != "") {
+		return newStateError("invalid_handler", "generic handler cannot name a template or path", nil)
+	}
 	if site.Nginx.Handler.Type == "custom" && (!filepath.IsAbs(site.Nginx.Handler.Path) || site.Nginx.Handler.Path == ".") {
 		return newStateError("invalid_handler", "custom handler requires absolute path", nil)
 	}
 	if site.Nginx.Handler.Type == "custom" {
-		info, err := os.Stat(site.Nginx.Handler.Path)
+		info, err := os.Lstat(site.Nginx.Handler.Path)
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0444 == 0 {
 			return newStateError("invalid_handler", "custom handler must be a readable regular file", err)
 		}
 	}
-	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" {
+	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" && site.Nginx.Handler.Type != "generic" {
 		return newStateError("invalid_handler", "handler type must be template or custom", nil)
 	}
 	if site.MariaDB != nil && !isValidMariaDBName(site.MariaDB.Database) {
@@ -280,6 +303,9 @@ func (s Snapshot) Validate() error {
 		}
 		if site.MariaDB != nil && !s.Config.Services.MariaDB.Installed {
 			return newStateError("mariadb_not_installed", "site database requires mariadb", nil)
+		}
+		if site.MariaDB != nil && !contains(s.Config.MariaDBRegistry.Databases, site.MariaDB.Database) {
+			return newStateError("invalid_mariadb", "site database must be recorded in the MariaDB registry", nil)
 		}
 	}
 	return nil

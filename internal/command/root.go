@@ -136,9 +136,9 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newServiceAliasCommand(runtime, service.Redis))
 	root.AddCommand(newPHPCommand(runtime))
 	root.AddCommand(newArtisanCommand(runtime))
-	root.AddCommand(newLinkCommand())
-	root.AddCommand(newUnlinkCommand())
-	root.AddCommand(newSitesCommand())
+	root.AddCommand(newLinkCommand(runtime))
+	root.AddCommand(newUnlinkCommand(runtime))
+	root.AddCommand(newSitesCommand(runtime))
 	root.AddCommand(newShellCommand())
 	root.AddCommand(newVersionCommand(runtime.Metadata))
 

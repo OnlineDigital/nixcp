@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	Version  = ""
-	Commit   = ""
-	BuiltAt  = ""
+	Version = ""
+	Commit  = ""
+	BuiltAt = ""
 )
 
 func main() {

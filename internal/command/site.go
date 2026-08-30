@@ -9,6 +9,7 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/output"
+	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/transaction"
 	"github.com/spf13/cobra"
@@ -139,7 +140,15 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 	}
 	return applySite(cmd, runtime, store, snap, nil, "link", site)
 }
+
+// canonicalDir resolves the physical path and applies the v1 site-path
+// safety rules: existing directory, readable/traversable, and no
+// world-writable component on the way to / (the shared rules live in the
+// internal/site package so status/doctor can reuse them).
 func canonicalDir(p string) (string, error) {
+	if _, err := sitepkg.CanonicalizePath(p); err != nil {
+		return "", fmt.Errorf("path must be an existing readable and traversable directory")
+	}
 	a, e := filepath.Abs(p)
 	if e != nil {
 		return "", e
@@ -152,14 +161,8 @@ func canonicalDir(p string) (string, error) {
 	if e != nil || !i.IsDir() || i.Mode().Perm()&0555 != 0555 || a == "/" {
 		return "", fmt.Errorf("path must be an existing readable and traversable directory")
 	}
-	for current := filepath.Clean(a); ; current = filepath.Dir(current) {
-		ancestor, statErr := os.Lstat(current)
-		if statErr != nil || !ancestor.IsDir() || (ancestor.Mode().Perm()&0002 != 0 && ancestor.Mode()&os.ModeSticky == 0) {
-			return "", fmt.Errorf("path must not be beneath a world-writable directory")
-		}
-		if current == "/" {
-			break
-		}
+	if err := sitepkg.RefuseWorldWritable(a); err != nil {
+		return "", fmt.Errorf("path must not be beneath a world-writable directory")
 	}
 	return filepath.Clean(a), nil
 }
@@ -300,11 +303,15 @@ func runSitesShow(cmd *cobra.Command, runtime Runtime, key string) error {
 	d, _ := state.NormalizeDomain(key)
 	for _, s := range snap.Sites {
 		if s.ID == key || s.Domain == d {
-			data := map[string]any{"site": s, "pool": "nixcp-" + s.ID, "socket": "/run/nixcp/php-fpm/" + s.ID + ".sock"}
+			// Read-only drift probe: socket + HTTP reachability as desired.
+			checker := sitepkg.RealChecker{}
+			health := checker.CheckSite(cmd.Context(), s.Domain, s.ID, s.Enabled)
+			data := map[string]any{"site": s, "pool": "nixcp-" + s.ID, "socket": sitepkg.SocketPath(s.ID), "health": health}
 			if commandJSON(cmd) {
 				return emitJSON(cmd, output.Success("sites.show", false, data, nil))
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", s.ID, s.Domain)
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", health.Describe())
 			return nil
 		}
 	}

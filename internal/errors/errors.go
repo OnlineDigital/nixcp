@@ -18,7 +18,15 @@ const (
 	ExitCodeHealth   ExitCode = 7
 	ExitCodeRollback ExitCode = 8
 	ExitCodeRuntime  ExitCode = 9
+	// ExitCodeProcess is the base for propagating a child process's own exit
+	// code verbatim: the final process exit code is ExitCodeProcess + child
+	// code, matching common CLI passthrough semantics (npm/ssh style).
+	ExitCodeProcess ExitCode = 100
 )
+
+// MaxProcessExitCode bounds how far process passthrough can reach so it can
+// never collide with the reserved 0-9 class range.
+const MaxProcessExitCode = 155
 
 // AppError is a typed command error.
 type AppError struct {
@@ -28,6 +36,33 @@ type AppError struct {
 	Details   string
 	ExitClass ExitCode
 	Cause     error
+	// ProcessExit, when non-nil, marks a passthrough error whose process exit
+	// code must be honored verbatim instead of the class-based code.
+	ProcessExit *ProcessExit
+}
+
+// ProcessExit carries a child process exit code for verbatim propagation.
+type ProcessExit struct {
+	ExitCode int
+	Command  string
+	Stderr   string
+	Signal   string
+}
+
+// WithProcessExit attaches process passthrough metadata to the error.
+func (e *AppError) WithProcessExit(pe ProcessExit) *AppError {
+	if e != nil {
+		e.ProcessExit = &pe
+	}
+	return e
+}
+
+// ProcessExitCode returns the verbatim child process exit code, if any.
+func (e *AppError) ProcessExitCode() (int, bool) {
+	if e == nil || e.ProcessExit == nil {
+		return 0, false
+	}
+	return e.ProcessExit.ExitCode, true
 }
 
 func (e *AppError) Error() string {
@@ -45,6 +80,21 @@ func (e *AppError) Unwrap() error { return e.Cause }
 func (e *AppError) ExitCode() ExitCode {
 	if e == nil {
 		return ExitCodeRuntime
+	}
+	// Honor process passthrough verbatim (clamped to the safe range so the
+	// 0-9 class codes stay reserved).
+	if e.ProcessExit != nil {
+		code := e.ProcessExit.ExitCode
+		if code < 0 {
+			code = 128 + (-code)
+		}
+		if code > int(MaxProcessExitCode) {
+			code = int(MaxProcessExitCode)
+		}
+		if code == 0 {
+			code = int(ExitCodeRuntime)
+		}
+		return ExitCode(code)
 	}
 	if e.ExitClass == 0 {
 		return ExitCodeRuntime

@@ -40,6 +40,15 @@ type Runtime struct {
 // WithStateHome injects an isolated state home for tests.
 func WithStateHome(home string) RuntimeOption { return func(rt *Runtime) { rt.StateHome = home } }
 
+// StateHomeOrDefault resolves the state root override or falls back to the
+// given user home (production default).
+func (rt Runtime) StateHomeOrDefault(fallback string) string {
+	if rt.StateHome != "" {
+		return rt.StateHome
+	}
+	return fallback
+}
+
 // RuntimeOption configures the composition root.
 type RuntimeOption func(*Runtime)
 
@@ -48,6 +57,15 @@ func WithRunner(r execx.Runner) RuntimeOption {
 	return func(rt *Runtime) {
 		if r != nil {
 			rt.Runner = r
+		}
+	}
+}
+
+// WithServices injects a systemd adapter (tests use fakes).
+func WithServices(s service.Systemd) RuntimeOption {
+	return func(rt *Runtime) {
+		if s != nil {
+			rt.Services = s
 		}
 	}
 }
@@ -106,17 +124,41 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 			cmd.Printf("NixCP CLI %s\n", runtime.Metadata.Version)
 			return nil
 		},
-		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if os.Geteuid() == 0 || os.Getenv("SUDO_UID") != "" || os.Getenv("SUDO_USER") != "" {
 				return errors.New("unsafe_privileged_execution", "NixCP must run as the configured unprivileged user, not through root or sudo", "Run ncp directly as your normal user", errors.ExitCodePrecond)
 			}
 			cmd.Root().Annotations["invoked-command"] = cmd.CommandPath()
+			// Pass-through commands (php, artisan) disable flag parsing so raw
+			// argv reaches the interpreter; the global flags still have to be
+			// honored, so parse them from the raw argv tail ourselves.
+			if cmd.DisableFlagParsing {
+				if err := parseGlobalFlags(cmd, args); err != nil {
+					return err
+				}
+			}
 			jsonOut, err := commandBoolFlag(cmd, "json")
 			if err != nil {
 				return errors.New("invalid_flag_state", err.Error(), "", errors.ExitCodePrecond)
 			}
 			if jsonOut {
 				_ = cmd.Flags().Set("no-input", "true")
+			}
+			// Bind the --timeout flag to the per-invocation context so every
+			// long-running child (php, artisan, rebuild) observes the same
+			// deadline. Cobra runs PersistentPreRunE after flag parsing, so
+			// the value is authoritative here.
+			timeout, tErr := commandTimeout(cmd)
+			if tErr != nil {
+				return errors.New("invalid_flag_state", tErr.Error(), "Use --timeout <duration>, e.g. --timeout 120s", errors.ExitCodePrecond)
+			}
+			if timeout > 0 {
+				invokeCtx, cancel := context.WithTimeout(cmd.Context(), timeout)
+				cmd.SetContext(invokeCtx)
+				// Cobra exposes no lifecycle hook for derived contexts, so the
+				// cancel func is surfaced for the composition root (ApplicationRoot.Execute)
+				// through a package-level registry keyed by the root command.
+				registerTimeoutCancel(cmd.Root(), cancel)
 			}
 			return nil
 		},
@@ -131,8 +173,8 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.PersistentFlags().Duration("timeout", 30*time.Second, "Operation timeout")
 
 	root.AddCommand(newInstallCommand(runtime))
-	root.AddCommand(newStatusCommand())
-	root.AddCommand(newDoctorCommand())
+	root.AddCommand(newStatusCommand(runtime))
+	root.AddCommand(newDoctorCommand(runtime))
 	root.AddCommand(newServiceCommand(runtime))
 	root.AddCommand(newServiceAliasCommand(runtime, service.Nginx))
 	root.AddCommand(newServiceAliasCommand(runtime, service.MariaDB))
@@ -172,6 +214,24 @@ func New(ctx context.Context, opts ...RuntimeOption) (*ApplicationRoot, error) {
 	return &ApplicationRoot{Root: root, Ctx: rootCtx, cancel: cancel}, nil
 }
 
+// timeoutCancelRegistry surfaces the per-invocation deadline cancel created
+// by PersistentPreRunE to Execute. Cobra runs PreRunE inside Execute, after
+// New has returned, so the handoff has to go through a package-level map;
+// the entry is removed as soon as Execute picks it up.
+var timeoutCancelRegistry = map[*cobra.Command]context.CancelFunc{}
+
+func registerTimeoutCancel(root *cobra.Command, cancel context.CancelFunc) {
+	timeoutCancelRegistry[root] = cancel
+}
+
+func takeTimeoutCancel(root *cobra.Command) context.CancelFunc {
+	cancel, ok := timeoutCancelRegistry[root]
+	if ok {
+		delete(timeoutCancelRegistry, root)
+	}
+	return cancel
+}
+
 // Execute runs the command tree and returns a contract-compatible exit code.
 func (a *ApplicationRoot) Execute() int {
 	defer func() {
@@ -181,6 +241,11 @@ func (a *ApplicationRoot) Execute() int {
 	}()
 
 	err := a.Root.ExecuteContext(a.Ctx)
+	// Release the --timeout deadline timer registered by PersistentPreRunE
+	// (Cobra has no derived-context lifecycle; the registry hands it back).
+	if tc := takeTimeoutCancel(a.Root); tc != nil {
+		tc()
+	}
 	if err == nil {
 		return int(errors.ExitCodeSuccess)
 	}

@@ -319,6 +319,12 @@ func NormalizeAndValidateConfig(raw []byte) (ConfigSnapshot, error) {
 		return cfg, err
 	}
 	cfg.Canonicalize()
+	// Declarative structural layer (go-playground/validator) runs after
+	// canonicalization and before semantic rules: it guards the structural
+	// contract of the v1 schema on every parsed config.yaml.
+	if err := applyStructural("config", structuralConfig(cfg)); err != nil {
+		return cfg, err
+	}
 	return cfg, ValidateConfig(cfg)
 }
 func NormalizeAndValidateSite(raw []byte) (SiteConfig, error) {
@@ -327,6 +333,10 @@ func NormalizeAndValidateSite(raw []byte) (SiteConfig, error) {
 		return site, err
 	}
 	site.Canonicalize()
+	// Same declarative structural layer for every parsed sites/*.yaml.
+	if err := applyStructural("site", structuralSite(site)); err != nil {
+		return site, err
+	}
 	return site, ValidateSite(site)
 }
 func ValidateSnapshots(candidates ...ConfigSnapshot) error {

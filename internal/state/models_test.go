@@ -50,7 +50,7 @@ func TestCanonicalConfigSortsAndDedupes(t *testing.T) {
 		Services: ServiceStates{
 			Nginx:   ServiceConfig{DesiredState: "RUNNING", Installed: true},
 			MariaDB: ServiceConfig{DesiredState: "stopped", Installed: false},
-			Redis:   ServiceConfig{DesiredState: "STOPPED", Installed: false},
+			Valkey:  ServiceConfig{DesiredState: "STOPPED", Installed: false},
 		},
 		PHP: PHPConfig{Installed: []string{"8.1", "8.0", "8.1"}, Extensions: []string{"xsl", "xsl", "intl"}},
 	}
@@ -78,7 +78,7 @@ func TestValidateConfigRejectsUnsupportedSchema(t *testing.T) {
 		Services: ServiceStates{
 			Nginx:   ServiceConfig{DesiredState: "stopped"},
 			MariaDB: ServiceConfig{DesiredState: "stopped"},
-			Redis:   ServiceConfig{DesiredState: "stopped"},
+			Valkey:  ServiceConfig{DesiredState: "stopped"},
 		},
 		PHP: PHPConfig{},
 	}
@@ -96,7 +96,7 @@ func TestValidateConfigRejectsGlobalDefaultAndExtensions(t *testing.T) {
 		Services: ServiceStates{
 			Nginx:   ServiceConfig{Installed: true, DesiredState: "stopped"},
 			MariaDB: ServiceConfig{Installed: false, DesiredState: "stopped"},
-			Redis:   ServiceConfig{Installed: false, DesiredState: "stopped"},
+			Valkey:  ServiceConfig{Installed: false, DesiredState: "stopped"},
 		},
 		PHP: PHPConfig{Installed: []string{"8.1", "8.1"}, GlobalDefault: "8.2", Extensions: []string{"wrong-"}},
 	}
@@ -149,7 +149,7 @@ services:
   mariadb:
     installed: false
     desiredState: stopped
-  redis:
+  valkey:
     installed: false
     desiredState: stopped
 php:

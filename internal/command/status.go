@@ -28,7 +28,7 @@ func desiredServiceConfig(c state.ConfigSnapshot, name service.Name) state.Servi
 	case service.MariaDB:
 		return c.Services.MariaDB
 	default:
-		return c.Services.Redis
+		return c.Services.Valkey
 	}
 }
 
@@ -39,7 +39,7 @@ func serviceHasDrift(desired state.ServiceConfig, actual service.Actual) bool {
 
 func collectServiceStatus(cmd *cobra.Command, runtime Runtime, config state.ConfigSnapshot) map[string]serviceStatus {
 	result := make(map[string]serviceStatus, 3)
-	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Redis} {
+	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Valkey} {
 		desired := desiredServiceConfig(config, name)
 		entry := serviceStatus{Desired: desired}
 		if runtime.Services == nil {
@@ -80,7 +80,7 @@ func newStatusCommand(runtime Runtime) *cobra.Command {
 		services := collectServiceStatus(cmd, runtime, snap.Config)
 		actual := map[string]any{}
 		drift := []string{}
-		for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Redis} {
+		for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Valkey} {
 			entry := services[string(name)]
 			actual[string(name)] = entry.Actual
 			if entry.Drift != nil && *entry.Drift {
@@ -98,7 +98,7 @@ func newStatusCommand(runtime Runtime) *cobra.Command {
 			return emitJSON(cmd, output.Success("status", false, data, nil))
 		}
 		cmd.Printf("%s: configured (%d sites, php %s)\n", ui.Heading("status"), len(snap.Sites), snap.Config.PHP.GlobalDefault)
-		for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Redis} {
+		for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Valkey} {
 			entry := services[string(name)]
 			if entry.Actual == nil {
 				cmd.Printf("%s: desired=%s installed=%t actual=unknown drift=unknown (%s)\n", name, entry.Desired.DesiredState, entry.Desired.Installed, entry.Error)

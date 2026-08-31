@@ -16,7 +16,7 @@ func TestNixStringEscapesAndContainsInterpolation(t *testing.T) {
 
 func TestRenderIsDeterministicAndHTTPOnly(t *testing.T) {
 	path := t.TempDir()
-	c := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", Group: "g", Home: "/tmp/u"}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}}}
+	c := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", Group: "g", Home: "/tmp/u"}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}}}
 	s := state.Snapshot{Config: c, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "example-com", Enabled: true, Domain: "example.com", ProjectPath: path, DocumentRoot: path, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}}
 	r := Renderer{}
 	a, e := r.Render(s)
@@ -59,7 +59,7 @@ func TestMariaDBAccountsSQL(t *testing.T) {
 
 func TestRenderMariaDBAccountsNeverLeaksPassword(t *testing.T) {
 	const pw = "nixcpfixturesecret9876543210"
-	c := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "nixcp", Group: "nixcp", Home: "/home/nixcp"}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{Installed: true, DesiredState: "running"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3", "8.4"}}, MariaDBRegistry: state.MariaDBRegistry{Databases: []string{"app"}}}
+	c := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "nixcp", Group: "nixcp", Home: "/home/nixcp"}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{Installed: true, DesiredState: "running"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3", "8.4"}}, MariaDBRegistry: state.MariaDBRegistry{Databases: []string{"app"}}}
 	s := state.Snapshot{Config: c, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: "/home", DocumentRoot: "/home", PHP: "8.4", MariaDB: &state.MariaDBConfig{Database: "app", User: "app", Password: pw}, Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}}
 	b, e := (Renderer{}).Render(s)
 	if e != nil {

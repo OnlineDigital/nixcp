@@ -294,5 +294,5 @@ func (testSystemd) Status(context.Context, service.Name) (service.Actual, error)
 func (testSystemd) Restart(context.Context, service.Name) error { return nil }
 
 func testSiteConfig(home string) state.ConfigSnapshot {
-	return state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Redis: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}}
+	return state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}}
 }

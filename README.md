@@ -3,7 +3,7 @@
 NixCP is an **HTTP-only, CLI-only NixOS control plane** for one trusted local
 user. It keeps desired state in `~/.nixcp/*.yaml`, generates a NixOS module,
 and activates validated changes through a locked, rollback-capable transaction.
-It manages Nginx, local MariaDB/Redis, multiple nixpkgs PHP versions and
+It manages Nginx, local MariaDB/Valkey, multiple nixpkgs PHP versions and
 per-site PHP-FPM pools.
 
 > **Status:** v1 release candidate implementation. NixCP must be run by its
@@ -53,7 +53,7 @@ Read [SECURITY.md](SECURITY.md) before deployment. In particular:
 - NixCP serves **HTTP on port 80 only**. TLS, ACME, certificates, DNS, email,
   web UI, containers, Home Manager, and automatic source/config edits are
   deliberately unsupported and rejected where applicable.
-- MariaDB and Redis are local-only; PHP-FPM uses per-site Unix sockets.
+- MariaDB and Valkey are local-only; PHP-FPM uses per-site Unix sockets.
 - This is **not hostile multi-tenant hosting**. Pools reduce accidental
   cross-wiring but all sites run as the same trusted owner.
 - `unlink` and service `stop` do not delete project files, databases, or data.

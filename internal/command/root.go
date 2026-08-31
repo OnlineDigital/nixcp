@@ -223,7 +223,7 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newServiceCommand(runtime))
 	root.AddCommand(newServiceAliasCommand(runtime, service.Nginx))
 	root.AddCommand(newServiceAliasCommand(runtime, service.MariaDB))
-	root.AddCommand(newServiceAliasCommand(runtime, service.Redis))
+	root.AddCommand(newServiceAliasCommand(runtime, service.Valkey))
 	root.AddCommand(newPHPCommand(runtime))
 	root.AddCommand(newArtisanCommand(runtime))
 	root.AddCommand(newComposerCommand(runtime))

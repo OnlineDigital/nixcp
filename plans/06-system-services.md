@@ -2,7 +2,7 @@
 
 ## Obiectiv și dependențe
 
-Implementarea lifecycle-ului uniform pentru Nginx, MariaDB și Redis, păstrând configurația declarativă și datele la stop.
+Implementarea lifecycle-ului uniform pentru Nginx, MariaDB și Valkey, păstrând configurația declarativă și datele la stop.
 
 **Depinde de:** 03–05.  
 **Deblochează:** site-uri și baze declarate de site.
@@ -78,7 +78,7 @@ Preferință: un account MariaDB asociat owner-ului OS, autentificat prin Unix s
 
 Health: systemd active + ping local + verificarea non-destructivă a DB-urilor/grants declarate.
 
-## Redis
+## Valkey
 
 Default de securitate:
 
@@ -110,7 +110,7 @@ O interfață internă poate defini:
 Validate(state), RenderNix(state), Status(), Health(), Restart()
 ```
 
-Registrul v1 este o allowlist statică: nginx, mariadb, redis. Nu există dynamic plugins, nume arbitrare ori configurare generică de systemd units.
+Registrul v1 este o allowlist statică: nginx, mariadb, valkey. Nu există dynamic plugins, nume arbitrare ori configurare generică de systemd units.
 
 ## Pași de implementare
 
@@ -118,7 +118,7 @@ Registrul v1 este o allowlist statică: nginx, mariadb, redis. Nu există dynami
 2. Status desired/actual/drift și JSON schema.
 3. Nginx adapter/render/health.
 4. MariaDB adapter/render/provisioning/health.
-5. Redis adapter/render/health.
+5. Valkey adapter/render/health.
 6. Aliasuri top-level fără logică duplicată.
 7. Stop/start persistence și restart operațional.
 8. Golden, integration și VM tests.
@@ -128,7 +128,7 @@ Registrul v1 este o allowlist statică: nginx, mariadb, redis. Nu există dynami
 - unit failure după switch declanșează rollback tranzacțional;
 - restart failure nu schimbă YAML și raportează jurnal systemd bounded;
 - stop Nginx nu este blocat de site-uri, dar warning-ul este persistent în rezultat;
-- MariaDB/Redis unavailable la health-check declanșează rollback de configurație, fără manipularea datadir-ului;
+- MariaDB/Valkey unavailable la health-check declanșează rollback de configurație, fără manipularea datadir-ului;
 - NixCP nu încearcă „repair” destructiv.
 
 ## Criterii de acceptanță
@@ -137,5 +137,5 @@ Registrul v1 este o allowlist statică: nginx, mariadb, redis. Nu există dynami
 - aliasurile și forma `service` sunt identice semantic;
 - stop rămâne stop după reboot și nu dezinstalează/șterge date;
 - status detectează drift;
-- MariaDB și Redis sunt local-only;
+- MariaDB și Valkey sunt local-only;
 - health failure activează rollback sigur.

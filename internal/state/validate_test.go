@@ -33,7 +33,7 @@ services:
   mariadb:
     installed: false
     desiredState: stopped
-  redis:
+  valkey:
     installed: false
     desiredState: stopped
 php:

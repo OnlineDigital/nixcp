@@ -18,7 +18,7 @@ import (
 
 func newServiceCommand(runtime Runtime) *cobra.Command {
 	cmd := &cobra.Command{Use: "service", Short: "Manage allowlisted platform services"}
-	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Redis} {
+	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Valkey} {
 		cmd.AddCommand(newServiceSubcommand(runtime, name))
 	}
 	return cmd
@@ -122,7 +122,7 @@ func serviceConfig(c *state.ConfigSnapshot, n service.Name) *state.ServiceConfig
 	case service.MariaDB:
 		return &c.Services.MariaDB
 	default:
-		return &c.Services.Redis
+		return &c.Services.Valkey
 	}
 }
 func mutateService(cfg *state.ServiceConfig, n service.Name, action string, hasSites bool) (bool, string, error) {

@@ -8,7 +8,7 @@ NixCP este un panou de hosting **exclusiv CLI** pentru NixOS, implementat în Go
 - versiuni multiple PHP CLI și PHP-FPM;
 - extensii PHP disponibile în nixpkgs;
 - MariaDB;
-- Redis;
+- Valkey;
 - site-uri HTTP cu pool PHP-FPM separat și preset Nginx Laravel/WordPress ori snippet custom.
 
 Starea dorită este în `~/.nixcp/*.yaml`. Go validează starea și generează un modul NixOS; schimbările de sistem sunt activate prin `sudo nixos-rebuild`. Fișierele YAML sunt sursa adevărului, nu configurația Nix generată.
@@ -25,7 +25,7 @@ Starea dorită este în `~/.nixcp/*.yaml`. Go validează starea și generează u
 | Privilegii | CLI rulat fără root; `sudo` numai pentru operații controlate |
 | Web | Nginx, HTTP pe portul 80 |
 | PHP | pachete/extensii exclusiv din nixpkgs; CLI și FPM multi-versiune |
-| Date | MariaDB; Redis local |
+| Date | MariaDB; Valkey local |
 | Automatizare | output uman și contract stabil `--json` pentru scripturi/agenți AI |
 
 ### Invariantă HTTP-only
@@ -56,7 +56,7 @@ utilizator
    └──► transaction/rebuild ──────────────┴──► sudo nixos-rebuild
                                                    │
                                                    ▼
-                                 Nginx / PHP-FPM / MariaDB / Redis
+                                 Nginx / PHP-FPM / MariaDB / Valkey
 ```
 
 Straturi:
@@ -98,8 +98,8 @@ Directoarele sunt `0700`; fișierele de stare și cele generate sunt `0600`. Art
 ncp install [--flake <ref>] [--json]
 ncp status | doctor
 
-ncp service nginx|mariadb|redis install|start|status|stop|restart
-ncp nginx|mariadb|redis install|start|status|stop|restart  # alias ergonomic
+ncp service nginx|mariadb|valkey install|start|status|stop|restart
+ncp nginx|mariadb|valkey install|start|status|stop|restart  # alias ergonomic
 
 ncp php install <8.x>
 ncp php ext install <nume>
@@ -197,7 +197,7 @@ Produsul v1 este gata când:
 - două terminale pot folosi direct `php` cu versiuni diferite;
 - Laravel, WordPress și snippet-uri custom validate funcționează pe HTTP;
 - fiecare site folosește pool-ul și versiunea FPM corecte;
-- MariaDB și Redis nu sunt expuse public;
+- MariaDB și Valkey nu sunt expuse public;
 - output-ul `--json` este unic, stabil, fără ANSI/prompturi;
 - testele unitare, integration, shell, evaluare Nix și NixOS VM sunt verzi;
 - niciun eșec de build/switch nu lasă starea declarată și sistemul activ în divergență tăcută.

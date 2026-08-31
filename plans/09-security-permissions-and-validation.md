@@ -18,7 +18,7 @@ Hardening al întregului control plane înainte de release: filesystem, sudo, Ni
 - argv/sudo injection;
 - proiecte sub directoare world-writable;
 - domenii care produc host/header confusion;
-- expunere publică MariaDB/Redis;
+- expunere publică MariaDB/Valkey;
 - acces cross-site la socket-uri FPM;
 - execuția accidentală ca root;
 - output/log-uri care expun date sensibile.
@@ -92,7 +92,7 @@ Paths sub directoare world-writable sunt refuzate sau cer un opt-in explicit vii
 
 - Nginx ascultă numai HTTP/80 conform scopului;
 - MariaDB ascultă unix socket/loopback, fără firewall opening;
-- Redis ascultă loopback, protected mode;
+- Valkey ascultă loopback, protected mode;
 - health-check confirmă listeners reali;
 - nicio opțiune YAML nu configurează public bind pentru DB/cache;
 - FPM folosește Unix sockets, nu TCP public;
@@ -138,7 +138,7 @@ V1 evită generarea parolelor DB prin Unix socket auth. Dacă un viitor feature 
 - Nginx context escape corpus;
 - shell injection în toate cele 3 shell-uri;
 - argv capture tests pentru sudo/rebuild/systemctl;
-- VM test listeners (`ss`) pentru DB/Redis/FPM;
+- VM test listeners (`ss`) pentru DB/Valkey/FPM;
 - negative tests TLS la schema și snippet;
 - static analysis (`go vet`, `staticcheck`, govulncheck) și dependency scanning;
 - race detector pentru state/transaction tests.
@@ -147,7 +147,7 @@ V1 evită generarea parolelor DB prin Unix socket auth. Dacă un viitor feature 
 
 - niciun input nu ajunge ca expresie Nix/shell/SQL brută;
 - symlink/owner/perms nesigure blochează înainte de sudo;
-- MariaDB/Redis/FPM nu sunt publice;
+- MariaDB/Valkey/FPM nu sunt publice;
 - custom Nginx nu poate prelua server context ori activa TLS;
 - NixCP nu rulează ca root;
 - threat model-ul și limitarea non-multi-tenant sunt documentate;

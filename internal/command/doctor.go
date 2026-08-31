@@ -93,7 +93,7 @@ func runDoctor(cmd *cobra.Command, runtime Runtime) error {
 func checkServiceDiagnostics(cmd *cobra.Command, runtime Runtime, config state.ConfigSnapshot) []doctorCheck {
 	statuses := collectServiceStatus(cmd, runtime, config)
 	checks := make([]doctorCheck, 0, len(statuses))
-	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Redis} {
+	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Valkey} {
 		status := statuses[string(name)]
 		check := doctorCheck{Name: "service." + string(name)}
 		if status.Actual == nil {

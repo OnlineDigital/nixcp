@@ -85,7 +85,7 @@ func BaseConfig(home string) state.ConfigSnapshot {
 		Services: state.ServiceStates{
 			Nginx:   state.ServiceConfig{DesiredState: "stopped"},
 			MariaDB: state.ServiceConfig{DesiredState: "stopped"},
-			Redis:   state.ServiceConfig{DesiredState: "stopped"},
+			Valkey:  state.ServiceConfig{DesiredState: "stopped"},
 		},
 		PHP: state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"},
 	}

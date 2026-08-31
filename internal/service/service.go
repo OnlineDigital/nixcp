@@ -15,12 +15,12 @@ type Name string
 const (
 	Nginx   Name = "nginx"
 	MariaDB Name = "mariadb"
-	Redis   Name = "redis"
+	Valkey  Name = "valkey"
 )
 
 func Parse(raw string) (Name, error) {
 	switch Name(raw) {
-	case Nginx, MariaDB, Redis:
+	case Nginx, MariaDB, Valkey:
 		return Name(raw), nil
 	default:
 		return "", fmt.Errorf("unsupported service %q", raw)
@@ -32,7 +32,9 @@ func (n Name) Unit() string {
 		return "nginx.service"
 	case MariaDB:
 		return "mysql.service"
-	case Redis:
+	case Valkey:
+		// NixOS's Redis-compatible service module derives this unit name even
+		// when its package is Valkey (services.redis.package = pkgs.valkey).
 		return "redis-nixcp.service"
 	default:
 		return ""
@@ -116,15 +118,15 @@ func (a Adapter) check(ctx context.Context, n Name) error {
 		name, args = "nginx", []string{"-t"}
 	case MariaDB:
 		name, args = "mysqladmin", []string{"ping", "--protocol=socket"}
-	case Redis:
-		name, args = "redis-cli", []string{"-h", "127.0.0.1", "ping"}
+	case Valkey:
+		name, args = "valkey-cli", []string{"-h", "127.0.0.1", "ping"}
 	}
 	res, err := a.run(ctx, name, args)
 	if err != nil {
 		return commandError(string(n)+" health", res, err)
 	}
-	if n == Redis && strings.TrimSpace(res.Stdout) != "PONG" {
-		return fmt.Errorf("redis health returned unexpected response")
+	if n == Valkey && strings.TrimSpace(res.Stdout) != "PONG" {
+		return fmt.Errorf("valkey health returned unexpected response")
 	}
 	// Listener locality is checked with a fixed, non-shell command. Public
 	// listeners are rejected for data services; nginx must expose only HTTP.
@@ -147,8 +149,8 @@ func validateListeners(n Name, out string) error {
 		if n == MariaDB && (strings.HasSuffix(local, ":3306") && !(strings.Contains(local, "127.0.0.1:") || strings.Contains(local, "[::1]:"))) {
 			return fmt.Errorf("mariadb listener is not local")
 		}
-		if n == Redis && (strings.HasSuffix(local, ":6379") && !(strings.Contains(local, "127.0.0.1:") || strings.Contains(local, "[::1]:"))) {
-			return fmt.Errorf("redis listener is not local")
+		if n == Valkey && (strings.HasSuffix(local, ":6379") && !(strings.Contains(local, "127.0.0.1:") || strings.Contains(local, "[::1]:"))) {
+			return fmt.Errorf("valkey listener is not local")
 		}
 	}
 	return nil

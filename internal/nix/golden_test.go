@@ -25,7 +25,7 @@ func TestRendererV1GoldenScenarios(t *testing.T) {
 		Services: state.ServiceStates{
 			Nginx:   state.ServiceConfig{DesiredState: "stopped"},
 			MariaDB: state.ServiceConfig{DesiredState: "stopped"},
-			Redis:   state.ServiceConfig{DesiredState: "stopped"},
+			Valkey:  state.ServiceConfig{DesiredState: "stopped"},
 		},
 		PHP: state.PHPConfig{Installed: []string{"8.3", "8.4"}, Extensions: []string{"intl", "redis"}},
 	}
@@ -35,7 +35,7 @@ func TestRendererV1GoldenScenarios(t *testing.T) {
 		sites             []state.SiteConfig
 	}{
 		{"empty", "module-marker", emptyConfig(base), nil},
-		{"services", "services.redis.servers.nixcp", withServices(base), nil},
+		{"services", "services.redis.package = pkgs.valkey", withServices(base), nil},
 		{"php", "pkgs.php84.withExtensions", base, nil},
 		{"sites", "virtualHosts.\"example.test\"", withNginx(base), []state.SiteConfig{{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.4", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
 		{"mariadb", "systemd.services.nixcp-mariadb-accounts", withMariaDB(base), []state.SiteConfig{{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.4", MariaDB: &state.MariaDBConfig{Database: "app", User: "app", Password: "nixcpfixturepass123456"}, Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
@@ -122,7 +122,7 @@ func withNginx(c state.ConfigSnapshot) state.ConfigSnapshot {
 func withServices(c state.ConfigSnapshot) state.ConfigSnapshot {
 	c.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "stopped"}
 	c.Services.MariaDB = state.ServiceConfig{Installed: true, DesiredState: "running"}
-	c.Services.Redis = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	c.Services.Valkey = state.ServiceConfig{Installed: true, DesiredState: "running"}
 	c.MariaDBRegistry.Databases = []string{"app"}
 	return c
 }

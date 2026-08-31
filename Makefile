@@ -5,7 +5,7 @@ COMMIT ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell git show -s --format=%cI HEAD 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuiltAt=$(BUILD_DATE)
 
-.PHONY: all fmt fmt-check vet test check race fuzz-smoke build static test-shell nix-eval completions release clean
+.PHONY: all fmt fmt-check vet test check race fuzz-smoke build static test-shell nix-eval nix-container-test completions release clean
 
 all: check build
 
@@ -43,6 +43,9 @@ test-shell:
 
 nix-eval:
 	@if command -v nix >/dev/null 2>&1; then nix eval --impure --expr 'let pkgs = import <$(NIXPKGS_REF)> {}; in pkgs.stdenv.hostPlatform.system'; else echo 'nix unavailable; Nix evaluation skipped'; fi
+
+nix-container-test:
+	./scripts/test-nix-container.sh
 
 completions: build
 	mkdir -p dist/completions

@@ -36,7 +36,7 @@ func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
 		}
 	}
 
-	for _, c := range []string{"nginx", "mariadb", "redis"} {
+	for _, c := range []string{"nginx", "mariadb", "valkey"} {
 		for _, a := range []string{"install", "start", "status", "stop", "restart"} {
 			if cmd, _, err := root.Find([]string{c, a}); err != nil || cmd == nil {
 				t.Fatalf("missing alias %q for %q (err=%v)", a, c, err)
@@ -189,7 +189,7 @@ func TestShellAliasEquality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to build app: %v", err)
 	}
-	for _, service := range []string{"nginx", "mariadb", "redis"} {
+	for _, service := range []string{"nginx", "mariadb", "valkey"} {
 		for _, action := range []string{"install", "start", "status", "stop", "restart"} {
 			aliasCmd, _, err := app.Root.Find([]string{service, action})
 			serviceCmd, _, err2 := app.Root.Find([]string{"service", service, action})

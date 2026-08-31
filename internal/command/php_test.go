@@ -460,6 +460,6 @@ func TestExtensionInstallUnavailableForInstalledVersions(t *testing.T) {
 	}
 	root.SetArgs([]string{"php", "ext", "install", "redis"})
 	if err := root.Execute(); err != nil {
-		t.Fatalf("expected redis to be available for installed 8.3, got error: %v", err)
+		t.Fatalf("expected redis PHP extension to be available for installed 8.3, got error: %v", err)
 	}
 }

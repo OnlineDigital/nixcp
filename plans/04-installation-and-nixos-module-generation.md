@@ -86,13 +86,13 @@ Renderer-ul produce o expresie completă, nu fragmente modificate cu regex.
 - presetul/custom snippet este inserat în boundary-ul server/location prevăzut;
 - niciun câmp SSL/TLS și nicio opțiune care activează automat ACME.
 
-### MariaDB și Redis
+### MariaDB și Valkey
 
 - packages/options NixOS doar când sunt installed;
 - desired stopped păstrează pachetul/config/data, dar elimină activarea automată controlată;
 - MariaDB declară bazele din site-uri fără drop automat;
 - user provisioning local este declarativ sau printr-o unitate oneshot idempotentă restrânsă;
-- Redis ascultă numai loopback și nu este public.
+- Valkey ascultă numai loopback și nu este public.
 
 ## Problema serviciilor „installed dar stopped”
 

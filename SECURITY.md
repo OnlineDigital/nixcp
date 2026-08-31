@@ -15,7 +15,7 @@ health-check, and restore state/generation when a later phase fails.
 
 - Only Nginx HTTP/80 is public. TLS/SSL, ACME, certificates, HTTPS, DNS, and
   email are permanently outside this product.
-- MariaDB and Redis bind locally; FPM uses Unix sockets rather than TCP.
+- MariaDB and Valkey bind locally; FPM uses Unix sockets rather than TCP.
 - State, generated modules, shell artifacts, journals, and backups are private
   (`0600` files in `0700` directories). Symlinks, unsafe owner/mode, and unsafe
   managed entries are rejected before privileged work.

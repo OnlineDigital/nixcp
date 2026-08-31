@@ -51,7 +51,7 @@ that project path's permissions.
 
 NixCP v1 is for applications controlled by one trusted user. Separate FPM pools
 and Unix sockets prevent accidental site cross-wiring, but they are **not** a
-hostile multi-tenant hosting isolation boundary. MariaDB and Redis remain bound
+hostile multi-tenant hosting isolation boundary. MariaDB and Valkey remain bound
 to loopback/socket access; only Nginx HTTP port 80 is public. TLS is permanently
 outside this product's scope and custom Nginx snippets cannot add listener,
 server, include, TLS, or certificate directives.

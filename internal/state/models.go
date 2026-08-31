@@ -51,7 +51,7 @@ type RebuildConfig struct {
 type ServiceStates struct {
 	Nginx   ServiceConfig `yaml:"nginx"`
 	MariaDB ServiceConfig `yaml:"mariadb"`
-	Redis   ServiceConfig `yaml:"redis"`
+	Valkey  ServiceConfig `yaml:"valkey"`
 }
 type ServiceConfig struct {
 	Installed    bool   `yaml:"installed"`
@@ -155,7 +155,7 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 		cfg.Rebuild.Mode = rebuildModeTraditional
 	}
 	cfg.Rebuild.Target = strings.TrimSpace(cfg.Rebuild.Target)
-	for _, s := range []*ServiceConfig{&cfg.Services.Nginx, &cfg.Services.MariaDB, &cfg.Services.Redis} {
+	for _, s := range []*ServiceConfig{&cfg.Services.Nginx, &cfg.Services.MariaDB, &cfg.Services.Valkey} {
 		s.DesiredState = strings.ToLower(strings.TrimSpace(s.DesiredState))
 	}
 	cfg.PHP.GlobalDefault = strings.TrimSpace(cfg.PHP.GlobalDefault)
@@ -225,7 +225,7 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	if strings.ContainsAny(cfg.Rebuild.Target, "\x00\r\n") {
 		return newStateError("invalid_rebuild_target", "rebuild target contains unsafe characters", nil)
 	}
-	for name, svc := range map[string]ServiceConfig{"nginx": cfg.Services.Nginx, "mariadb": cfg.Services.MariaDB, "redis": cfg.Services.Redis} {
+	for name, svc := range map[string]ServiceConfig{"nginx": cfg.Services.Nginx, "mariadb": cfg.Services.MariaDB, "valkey": cfg.Services.Valkey} {
 		if !IsValidServiceState(svc.DesiredState) {
 			return newStateError("invalid_service_state", "invalid "+name+" desiredState", nil)
 		}

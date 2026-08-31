@@ -69,8 +69,8 @@ Pentru `ncp php ...`, `ncp artisan ...` și `ncp composer ...`, exit code-ul pro
 ncp install
 ncp status
 ncp doctor
-ncp service <nginx|mariadb|redis> <install|start|status|stop|restart>
-ncp <nginx|mariadb|redis> <install|start|status|stop|restart>
+ncp service <nginx|mariadb|valkey> <install|start|status|stop|restart>
+ncp <nginx|mariadb|valkey> <install|start|status|stop|restart>
 ncp php install <version>
 ncp php ext install <name>
 ncp php use <version>
@@ -109,7 +109,7 @@ Flag-uri planificate: `--flake <ref>` pentru rebuild-uri flake, `--impure` deriv
 
 ```text
 ncp service mariadb install
-ncp service redis start
+ncp service valkey start
 ncp nginx status
 ```
 

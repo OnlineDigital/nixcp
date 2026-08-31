@@ -91,13 +91,13 @@ Scenarii obligatorii:
 1. import/bootstrap și config gol;
 2. lifecycle Nginx + reboot;
 3. lifecycle MariaDB + data păstrată;
-4. lifecycle Redis + bind local;
+4. lifecycle Valkey + bind local;
 5. două site-uri cu versiuni PHP diferite;
 6. Laravel front-controller;
 7. WordPress front-controller;
 8. custom snippet valid și invalid;
 9. MariaDB DB + Unix-socket account/grants;
-10. Redis `PING` local și lipsă listener public;
+10. Valkey `PING` local și lipsă listener public;
 11. stop/start persistă după reboot;
 12. build Nginx invalid nu înlocuiește site-ul funcțional;
 13. health-check failure declanșează rollback;
@@ -145,7 +145,7 @@ Lock, staging, journal, build/switch/verify/rollback și fault-injection. **Gate
 
 ### M5 — servicii
 
-Nginx/MariaDB/Redis lifecycle complet, desired/actual status, local-only health.
+Nginx/MariaDB/Valkey lifecycle complet, desired/actual status, local-only health.
 
 ### M6 — PHP
 
@@ -200,7 +200,7 @@ Toate acceptance criteria, package/release/checksums și changelog.
 - PHP/Artisan păstrează argv/signals/exit;
 - site-uri multi-PHP cu FPM pools separate;
 - Laravel/WordPress/custom funcționale numai pe HTTP;
-- MariaDB și Redis local-only;
+- MariaDB și Valkey local-only;
 - unlink/stop nu distrug date;
 - `--json` stabil, unic și prompt-free;
 - eșecurile nu lasă drift tăcut;

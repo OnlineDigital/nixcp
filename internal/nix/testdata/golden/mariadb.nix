@@ -15,8 +15,8 @@
     script = "# nixcp-mariadb-accounts sha256=655bd03c8edcea8d\n${pkgs.mariadb}/bin/mariadb --protocol=socket -u root --batch < /home/nixcp/.nixcp/secrets/mariadb/accounts.sql";
   };
   environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/bin/composer";
-  environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
-  environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
+  environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
+  environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
   services.phpfpm.pools."nixcp-example-test" = { user = "nixcp"; group = "nixcp"; phpPackage = pkgs.php84; settings = { listen = "/run/nixcp/php-fpm/example-test.sock"; "listen.owner" = "nginx"; "listen.group" = "nginx"; "listen.mode" = "0660"; }; };
   services.nginx.virtualHosts."example.test" = {
     listen = [{ addr = "0.0.0.0"; port = 80; }];

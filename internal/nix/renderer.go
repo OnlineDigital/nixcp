@@ -52,8 +52,9 @@ func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 		b.WriteString("  services.mysql.enable = true;\n")
 		b.WriteString("  services.mysql.settings.mysqld.bind-address = \"127.0.0.1\";\n")
 	})
-	renderServicePolicy(b, "redis-nixcp", c.Services.Redis, func() {
-		b.WriteString("  services.redis.servers.nixcp = { enable = true; bind = \"127.0.0.1\"; port = 6379; protectedMode = true; }\n")
+	renderServicePolicy(b, "valkey-nixcp", c.Services.Valkey, func() {
+		b.WriteString("  services.redis.package = pkgs.valkey;\n")
+		b.WriteString("  services.redis.servers.nixcp = { enable = true; bind = \"127.0.0.1\"; port = 6379; };\n")
 	})
 	if len(c.MariaDBRegistry.Databases) > 0 {
 		values := make([]string, 0, len(c.MariaDBRegistry.Databases))
@@ -150,7 +151,7 @@ func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
 		exts := make([]string, 0, len(c.PHP.Extensions))
 		for _, ext := range c.PHP.Extensions {
 			if attr, compatible := php.Compatible(v, ext); compatible {
-				exts = append(exts, "phpExtensions."+attr)
+				exts = append(exts, "all."+attr)
 			}
 		}
 		// PHP CLI and FPM consumers share this single nixpkgs composition.

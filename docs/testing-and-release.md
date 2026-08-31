@@ -19,6 +19,36 @@ host configuration, switches no generation, starts no service, and touches no
 database. The VM scenarios listed below are CI/release fixtures only and are
 **not executed by local Make targets**.
 
+## Disposable Docker Nix evaluation
+
+On an x86_64 Linux host with Docker, run:
+
+```sh
+make nix-container-test
+# equivalently: ./scripts/test-nix-container.sh
+```
+
+The launcher uses Docker Hub's pinned `nixos/nix:2.35.2` image and `docker run
+--rm`. It mounts the checkout read-only, preserves only a Docker-managed Nix
+store cache volume, runs Go tests as the invoking unprivileged UID, and
+NixOS-module-evaluates every rendered golden fixture. Override the image only
+when deliberately testing another compatible Nix version:
+
+```sh
+NIXCP_NIX_IMAGE=nixos/nix:2.35.2 ./scripts/test-nix-container.sh
+```
+
+This is deliberately **not** an installation or service-lifecycle test. The
+`nixos/nix` image is a Nix environment, not a booted NixOS system with systemd,
+`nixos-rebuild`, or NixCP's required host admission conditions. It neither
+runs `ncp install` nor switches a generation, starts listeners, or creates a
+database. Those scenarios remain the disposable NixOS VM release gate.
+
+The launcher does not use `--privileged`. That flag would grant broad device
+and kernel access to the container and is unnecessary for evaluation. Any
+future PID-1/systemd fixture must be separate, disposable, and explicitly
+document why elevated container privileges are required before using them.
+
 ## Test matrix
 
 | Layer | Coverage |

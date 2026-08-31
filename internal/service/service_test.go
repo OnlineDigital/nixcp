@@ -10,7 +10,7 @@ import (
 )
 
 func TestParseIsClosedAllowlist(t *testing.T) {
-	for _, name := range []string{"nginx", "mariadb", "redis"} {
+	for _, name := range []string{"nginx", "mariadb", "valkey"} {
 		if _, err := Parse(name); err != nil {
 			t.Fatalf("Parse(%q): %v", name, err)
 		}
@@ -47,8 +47,8 @@ func TestAdapterReturnsSystemdFailure(t *testing.T) {
 	}
 }
 func TestLocalityAndHTTPValidation(t *testing.T) {
-	if err := validateListeners(Redis, "LISTEN 0 511 0.0.0.0:6379 0.0.0.0:*"); err == nil {
-		t.Fatal("public redis accepted")
+	if err := validateListeners(Valkey, "LISTEN 0 511 0.0.0.0:6379 0.0.0.0:*"); err == nil {
+		t.Fatal("public valkey accepted")
 	}
 	if err := validateListeners(MariaDB, "LISTEN 0 511 [::1]:3306 [::]:*"); err != nil {
 		t.Fatal(err)

@@ -64,7 +64,7 @@ func TestDoctorConfiguredReportsChecks(t *testing.T) {
 		t.Fatalf("doctor on healthy configured state failed: %d\n%s", code, buf.String())
 	}
 	out := buf.String()
-	for _, want := range []string{"state", "module", "artifacts", "import", "toolchain"} {
+	for _, want := range []string{"state", "module", "config", "artifacts", "import", "toolchain", "service.nginx"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected check %q in output:\n%s", want, out)
 		}
@@ -136,6 +136,74 @@ func TestStatusReportsActualFromSystemd(t *testing.T) {
 	}
 }
 
+func TestStatusReportsPerServiceDriftInHumanAndJSON(t *testing.T) {
+	home := t.TempDir()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{}), WithServices(&fakeSystemd{actual: service.Actual{Active: false, Enabled: false, Health: "inactive"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var human bytes.Buffer
+	app.Root.SetOut(&human)
+	app.Root.SetArgs([]string{"status"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("exit %d: %s", code, human.String())
+	}
+	if !strings.Contains(human.String(), "nginx: desired=running") || !strings.Contains(human.String(), "drift=true") {
+		t.Fatalf("human status does not expose drift: %s", human.String())
+	}
+
+	app.Root.SetOut(&human)
+	human.Reset()
+	app.Root.SetArgs([]string{"--json", "status"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("exit %d: %s", code, human.String())
+	}
+	for _, want := range []string{`"services"`, `"drift":["nginx"]`, `"actual":{"active":false`, `"drift":true`} {
+		if !strings.Contains(human.String(), want) {
+			t.Fatalf("missing %q in %s", want, human.String())
+		}
+	}
+}
+
+func TestStatusMarksUnavailableSystemdAsUnknown(t *testing.T) {
+	// Use an explicitly failing probe so this assertion does not depend on the
+	// host's systemd.
+	dir := t.TempDir()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = dir
+	if err := state.NewStore(dir).Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	failing, err := New(context.Background(), WithStateHome(dir), WithServices(&fakeSystemd{err: errBoom{}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	failing.Root.SetOut(&buf)
+	failing.Root.SetArgs([]string{"--json", "status"})
+	if code := failing.Execute(); code != 0 {
+		t.Fatalf("exit %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), `"actual":null`) || !strings.Contains(buf.String(), `"drift":null`) {
+		t.Fatalf("unavailable systemd must be unknown, got %s", buf.String())
+	}
+}
+
 func TestStatusDegradesWhenSystemdUnavailable(t *testing.T) {
 	home := t.TempDir()
 	app, _, _ := doctorTestApp(t, false)
@@ -196,5 +264,32 @@ func TestDoctorJSONFailsOnUnhealthyHost(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `"healthy":false`) {
 		t.Fatalf("expected healthy:false in JSON output, got:\n%s", buf.String())
+	}
+}
+
+func TestDoctorFailsOnConfiguredServiceDrift(t *testing.T) {
+	home := t.TempDir()
+	u, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	if err := state.NewStore(home).Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{}), WithServices(&fakeSystemd{actual: service.Actual{Active: false, Enabled: false, Health: "inactive"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	app.Root.SetOut(&buf)
+	app.Root.SetArgs([]string{"doctor"})
+	if code := app.Execute(); code == 0 {
+		t.Fatalf("service drift must fail doctor: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "service.nginx") || !strings.Contains(buf.String(), "desired=running") {
+		t.Fatalf("missing actionable service diagnostic: %s", buf.String())
 	}
 }

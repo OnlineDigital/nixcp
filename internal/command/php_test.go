@@ -9,10 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	shellpkg "github.com/nixcp/nixcp/internal/shell"
+
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/php"
 	"github.com/nixcp/nixcp/internal/state"
+	"github.com/nixcp/nixcp/internal/transaction"
 )
 
 func phpTestApp(t *testing.T) (*ApplicationRoot, *execx.FakeRunner, string) {
@@ -65,6 +68,50 @@ func TestPHPUseWritesLocalMarkerAtomically(t *testing.T) {
 		t.Fatalf("marker %q %v", b, err)
 	}
 }
+
+func TestPHPUseAcceptsStickyWorldWritableAncestor(t *testing.T) {
+	app, _, _ := phpTestApp(t)
+	d := t.TempDir() // CI temp roots are commonly beneath sticky /tmp.
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(d); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"php", "use", "8.3"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("sticky ancestor should be accepted, exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(d, ".php-version")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPHPUseRejectsNonStickyWorldWritableAncestor(t *testing.T) {
+	app, _, _ := phpTestApp(t)
+	unsafe := filepath.Join(t.TempDir(), "unsafe")
+	project := filepath.Join(unsafe, "project")
+	if err := os.Mkdir(unsafe, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(unsafe, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(project, 0755); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"php", "use", "8.3"})
+	if code := app.Execute(); code == 0 {
+		t.Fatal("non-sticky world-writable ancestor must be refused")
+	}
+	if _, err := os.Stat(filepath.Join(project, ".php-version")); !os.IsNotExist(err) {
+		t.Fatalf("marker written despite refusal: %v", err)
+	}
+}
 func TestArtisanRejectsSymlink(t *testing.T) {
 	app, _, _ := phpTestApp(t)
 	d := t.TempDir()
@@ -80,7 +127,7 @@ func TestArtisanRejectsSymlink(t *testing.T) {
 	}
 }
 func TestShellSnippetOnlyWrapsPHPUse(t *testing.T) {
-	s, err := shellSnippet("bash")
+	s, err := shellpkg.Snippet("bash")
 	if err != nil || !bytes.Contains([]byte(s), []byte("$1\" = php")) {
 		t.Fatalf("bad snippet %q %v", s, err)
 	}
@@ -206,7 +253,7 @@ func TestShellEmitPrintsOnlyShellCode(t *testing.T) {
 		t.Fatalf("exit %d", code)
 	}
 	code := buf.String()
-	want, wantErr := shellActivation("bash", "8.3")
+	want, wantErr := shellpkg.Activation("bash", "8.3")
 	if wantErr != nil {
 		t.Fatal(wantErr)
 	}
@@ -301,5 +348,118 @@ func TestPHPTimeoutValueNotForwardedAsStrayArg(t *testing.T) {
 		if strings.Contains(a, "--timeout") || a == "45s" {
 			t.Fatalf("timeout token/value leaked to child argv: %#v", r.Runs[0].Args)
 		}
+	}
+}
+
+func TestPHPSessionEmitsGlobalDefaultActivation(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+	app, _, _ := phpTestApp(t)
+	var buf bytes.Buffer
+	app.Root.SetOut(&buf)
+	app.Root.SetArgs([]string{"php", "session", "--shell-emit=bash"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	want, err := shellpkg.Activation("bash", "8.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != want {
+		t.Fatalf("session must emit the global default activation.\ngot: %q\nwant: %q", buf.String(), want)
+	}
+}
+
+func TestPHPSessionPrefersActiveEnvVersion(t *testing.T) {
+	dir := t.TempDir()
+	cwd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(cwd)
+	app, _, _ := phpTestApp(t)
+	t.Setenv("NIXCP_PHP_VERSION", "8.3")
+	var buf bytes.Buffer
+	app.Root.SetOut(&buf)
+	app.Root.SetArgs([]string{"php", "session", "--shell-emit=bash"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	want, _ := shellpkg.Activation("bash", "8.3")
+	if buf.String() != want {
+		t.Fatalf("session must prefer the active env version, got %q", buf.String())
+	}
+}
+
+func TestPHPSessionSilentWithoutDefault(t *testing.T) {
+	home := t.TempDir()
+	u, _ := user.Current()
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3"}} // no GlobalDefault set
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	app.Root.SetOut(&buf)
+	app.Root.SetArgs([]string{"php", "session", "--shell-emit=bash"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("session must be silent when no default is configured, got %q", buf.String())
+	}
+}
+
+func TestExtensionInstallFailsWithoutInstalledPHP(t *testing.T) {
+	home := t.TempDir()
+	u, _ := user.Current()
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{}} // none installed yet
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"php", "ext", "install", "redis"})
+	if code := app.Execute(); code == 0 {
+		t.Fatal("ext install must fail when no PHP version is installed")
+	}
+}
+
+func TestExtensionInstallUnavailableForInstalledVersions(t *testing.T) {
+	home := t.TempDir()
+	u, _ := user.Current()
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	rt := defaultRuntime()
+	rt.Runner = &execx.FakeRunner{}
+	rt.StateHome = home
+	rt.Transactions = &transaction.Manager{Root: filepath.Join(home, ".nixcp"), Locker: transaction.FlockLocker{Path: filepath.Join(home, ".nixcp", "lock")}, Rebuilder: testRebuilder{}, Health: phpHealth{}}
+	root, err := NewRootCommand(context.Background(), func(r *Runtime) { *r = rt })
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.SetArgs([]string{"php", "ext", "install", "redis"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("expected redis to be available for installed 8.3, got error: %v", err)
 	}
 }

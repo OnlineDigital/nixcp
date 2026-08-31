@@ -44,7 +44,7 @@ func linkedTestApp(t *testing.T, args ...string) (*ApplicationRoot, string) {
 		t.Fatal(err)
 	}
 	snap.Config.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
-	snap.Sites = append(snap.Sites, state.SiteConfig{SchemaVersion: 1, ID: "app-example-com", Domain: "app.example.com", ProjectPath: project, DocumentRoot: filepath.Join(project, "public"), PHP: snap.Config.PHP.GlobalDefault, Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}})
+	snap.Sites = append(snap.Sites, state.SiteConfig{SchemaVersion: 2, ID: "app-example-com", Domain: "app.example.com", ProjectPath: project, DocumentRoot: filepath.Join(project, "public"), PHP: snap.Config.PHP.GlobalDefault, Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}})
 	if err := store.WriteSnapshot(snap); err != nil {
 		t.Fatal(err)
 	}

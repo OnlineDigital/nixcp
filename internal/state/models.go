@@ -2,18 +2,24 @@
 package state
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/nixcp/nixcp/internal/nginxsnippet"
 )
 
-const supportedSchemaVersion = 1
+// supportedSchemaVersion is the only state schema accepted by this binary.
+const supportedSchemaVersion = 2
 
 var phpVersionPattern = regexp.MustCompile(`^(?:8\.[0-9]+)$`)
 var siteIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
+var databasePasswordPattern = regexp.MustCompile(`^[A-Za-z0-9]{16,64}$`)
 
 // ConfigSnapshot is config.yaml. Empty strings encode YAML null for nullable fields.
 type ConfigSnapshot struct {
@@ -73,6 +79,16 @@ type SiteConfig struct {
 }
 type MariaDBConfig struct {
 	Database string `yaml:"database"`
+	// User is the dedicated MariaDB login for this site's database. NixCP sets
+	// it to the database name (one database → one user, per plan 06), so two
+	// sites never share a MariaDB account.
+	User string `yaml:"user,omitempty"`
+	// Password is a generated, owner-only random secret kept in the private
+	// site YAML (0600). It is never written into the world-readable Nix store:
+	// the generated module provisions accounts from a private 0600
+	// ~/.nixcp/secrets/mariadb/accounts.sql file that the oneshot unit reads via
+	// stdin.
+	Password string `yaml:"password,omitempty"`
 }
 type NginxConfig struct {
 	Handler HandlerConfig `yaml:"handler"`
@@ -92,7 +108,7 @@ type Snapshot struct {
 
 // MarshalYAML preserves explicit nulls for nullable schema fields instead of
 // silently omitting them. This makes freshly generated config.yaml match the
-// published v1 schema and keeps canonical bytes stable.
+// published schema and keeps canonical bytes stable.
 func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 	type rebuildYAML struct {
 		Mode            string  `yaml:"mode"`
@@ -174,12 +190,22 @@ func (site *SiteConfig) Canonicalize() {
 	}
 	if site.MariaDB != nil {
 		site.MariaDB.Database = strings.TrimSpace(site.MariaDB.Database)
+		if site.MariaDB.User == "" {
+			// One database ⇒ one user (the database name), so a site's MariaDB
+			// account is never shared across sites.
+			site.MariaDB.User = site.MariaDB.Database
+		} else {
+			site.MariaDB.User = strings.TrimSpace(site.MariaDB.User)
+		}
+		if site.MariaDB.Password == "" {
+			site.MariaDB.Password = GenerateDatabasePassword()
+		}
 	}
 }
 
 func ValidateConfig(cfg ConfigSnapshot) error {
-	if err := DefaultMigrationPolicy().Check(cfg.SchemaVersion); err != nil {
-		return err
+	if cfg.SchemaVersion != supportedSchemaVersion {
+		return newStateError("unsupported_schema", "schemaVersion must be 2", nil)
 	}
 	if cfg.Owner.Username == "" || cfg.Owner.Group == "" || cfg.Owner.Home == "" || !filepath.IsAbs(cfg.Owner.Home) {
 		return newStateError("invalid_owner", "owner must contain username, group, and absolute home", nil)
@@ -232,8 +258,8 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	return nil
 }
 func ValidateSite(site SiteConfig) error {
-	if err := DefaultMigrationPolicy().Check(site.SchemaVersion); err != nil {
-		return err
+	if site.SchemaVersion != supportedSchemaVersion {
+		return newStateError("unsupported_schema", "schemaVersion must be 2", nil)
 	}
 	if site.ID == "" || !siteIDPattern.MatchString(site.ID) {
 		return newStateError("invalid_site_id", "invalid site id", nil)
@@ -273,12 +299,32 @@ func ValidateSite(site SiteConfig) error {
 		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0444 == 0 || info.Size() > maxCustomSnippetBytes {
 			return newStateError("invalid_handler", "custom handler must be a readable regular file within the size limit", err)
 		}
+		content, err := readRegularNoFollow(site.Nginx.Handler.Path, maxCustomSnippetBytes)
+		if err != nil {
+			return newStateError("invalid_handler", "cannot read custom handler", err)
+		}
+		if err := nginxsnippet.Validate(string(content)); err != nil {
+			return newStateError("invalid_handler", "custom handler is not a permitted location snippet", err)
+		}
+		if site.Nginx.Handler.Content != "" {
+			if err := nginxsnippet.Validate(site.Nginx.Handler.Content); err != nil {
+				return newStateError("invalid_handler", "custom handler content is not a permitted location snippet", err)
+			}
+		}
 	}
 	if site.Nginx.Handler.Type != "template" && site.Nginx.Handler.Type != "custom" && site.Nginx.Handler.Type != "generic" {
 		return newStateError("invalid_handler", "handler type must be template or custom", nil)
 	}
-	if site.MariaDB != nil && !isValidMariaDBName(site.MariaDB.Database) {
-		return newStateError("invalid_mariadb", "invalid database name", nil)
+	if site.MariaDB != nil {
+		if !isValidMariaDBName(site.MariaDB.Database) {
+			return newStateError("invalid_mariadb", "invalid database name", nil)
+		}
+		if site.MariaDB.User == "" || !isValidMariaDBName(site.MariaDB.User) {
+			return newStateError("invalid_mariadb", "invalid MariaDB user name", nil)
+		}
+		if !databasePasswordPattern.MatchString(site.MariaDB.Password) {
+			return newStateError("invalid_mariadb", "MariaDB password must be 16-64 alphanumeric characters", nil)
+		}
 	}
 	return nil
 }
@@ -288,6 +334,7 @@ func (s Snapshot) Validate() error {
 		return err
 	}
 	ids, domains := map[string]bool{}, map[string]bool{}
+	databases := map[string]bool{}
 	for _, site := range s.Sites {
 		site.Canonicalize()
 		if err := ValidateSite(site); err != nil {
@@ -307,6 +354,12 @@ func (s Snapshot) Validate() error {
 		if site.MariaDB != nil && !s.Config.Services.MariaDB.Installed {
 			return newStateError("mariadb_not_installed", "site database requires mariadb", nil)
 		}
+		if site.MariaDB != nil {
+			if databases[site.MariaDB.Database] {
+				return newStateError("database_in_use", "MariaDB database is already used by another site", nil)
+			}
+			databases[site.MariaDB.Database] = true
+		}
 		if site.MariaDB != nil && !contains(s.Config.MariaDBRegistry.Databases, site.MariaDB.Database) {
 			return newStateError("invalid_mariadb", "site database must be recorded in the MariaDB registry", nil)
 		}
@@ -319,9 +372,12 @@ func NormalizeAndValidateConfig(raw []byte) (ConfigSnapshot, error) {
 		return cfg, err
 	}
 	cfg.Canonicalize()
+	if cfg.SchemaVersion != supportedSchemaVersion {
+		return cfg, newStateError("unsupported_schema", "schemaVersion must be 2", nil)
+	}
 	// Declarative structural layer (go-playground/validator) runs after
 	// canonicalization and before semantic rules: it guards the structural
-	// contract of the v1 schema on every parsed config.yaml.
+	// contract of the current schema on every parsed config.yaml.
 	if err := applyStructural("config", structuralConfig(cfg)); err != nil {
 		return cfg, err
 	}
@@ -333,6 +389,9 @@ func NormalizeAndValidateSite(raw []byte) (SiteConfig, error) {
 		return site, err
 	}
 	site.Canonicalize()
+	if site.SchemaVersion != supportedSchemaVersion {
+		return site, newStateError("unsupported_schema", "schemaVersion must be 2", nil)
+	}
 	// Same declarative structural layer for every parsed sites/*.yaml.
 	if err := applyStructural("site", structuralSite(site)); err != nil {
 		return site, err
@@ -408,4 +467,18 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// GenerateDatabasePassword returns a fresh random alphanumeric secret for a
+// site's dedicated MariaDB account. Exported so the CLI can generate one at
+// link time; alphanumeric-only keeps it safe to embed in SQL single-quoted
+// literals, Nix strings and YAML plain scalars without any escaping.
+func GenerateDatabasePassword() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		// crypto/rand.Read must not fail on a supported platform; a predictable
+		// password would defeat the whole point.
+		panic(fmt.Sprintf("nixcp: cannot generate MariaDB password: %v", err))
+	}
+	return hex.EncodeToString(b)
 }

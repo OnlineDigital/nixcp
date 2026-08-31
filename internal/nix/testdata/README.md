@@ -1,13 +1,13 @@
 # Renderer fixture contract
 
-Golden fixture names are reserved for schema/marker version 1. The automated
+Golden fixture names are reserved for renderer marker version 1. The automated
 renderer tests cover deterministic output, HTTP-only behavior, service state,
 PHP, extensions, sites, FPM, and escaping. Fixture files belong here when a
 reviewed renderer output is promoted as a byte-for-byte compatibility contract.
 
 ## Golden files
 
-`golden/*.nix` are byte-for-byte compatibility contracts for schema v1: each
+`golden/*.nix` are byte-for-byte compatibility contracts for the renderer output: each
 fixed, deterministic scenario (`empty`, `services`, `php`, `sites`,
 `escaping`) must render to exactly those bytes. The golden test also renders
 each scenario twice and requires identical output. Site paths use the fixed

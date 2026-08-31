@@ -5,7 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nixcp/nixcp/internal/nix"
 	"github.com/nixcp/nixcp/internal/output"
+	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -106,4 +108,16 @@ func commandUIMode(cmd *cobra.Command) ui.Mode {
 	noInput, _ := commandBoolFlag(cmd, "no-input")
 	yes, _ := commandBoolFlag(cmd, "yes")
 	return ui.Mode{JSON: jsonOut, NoInput: noInput, Yes: yes}
+}
+
+// mariaDBSecretFiles returns the private 0600 SQL file (relative to the state
+// root) that carries the per-site MariaDB account grants, plus the path to
+// delete when no site declares a database. The module never embeds these
+// passwords; the generated oneshot unit reads this file at runtime via stdin.
+func mariaDBSecretFiles(snap state.Snapshot) (files map[string][]byte, deletes []string) {
+	rel := "secrets/mariadb/accounts.sql"
+	if sql := nix.MariaDBAccountsSQL(snap.Config, snap.Sites); sql != "" {
+		return map[string][]byte{rel: []byte(sql)}, nil
+	}
+	return nil, []string{rel}
 }

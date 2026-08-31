@@ -4,6 +4,16 @@
   assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux"; message = "NixCP requires x86_64-linux"; }];
   environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
   services.nginx.enable = true;
+  services.mysql.enable = true;
+  services.mysql.settings.mysqld.bind-address = "127.0.0.1";
+  services.mysql.ensureDatabases = [ "app" ];
+  systemd.services.nixcp-mariadb-accounts = {
+    description = "NixCP per-site MariaDB accounts";
+    after = [ "mysql.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = "# nixcp-mariadb-accounts sha256=655bd03c8edcea8d\n${pkgs.mariadb}/bin/mariadb --protocol=socket -u root --batch < /home/nixcp/.nixcp/secrets/mariadb/accounts.sql";
+  };
   environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/bin/composer";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
   environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";

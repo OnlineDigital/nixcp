@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nixcp/nixcp/internal/nginxsnippet"
+	"github.com/nixcp/nixcp/internal/securefs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,11 +43,11 @@ func (s *Store) Initialize(cfg ConfigSnapshot) error {
 }
 
 func (s *Store) managedDirs() []string {
-	return []string{s.Root, s.SitesPath(), filepath.Join(s.Root, "generated"), filepath.Join(s.Root, "shell"), filepath.Join(s.Root, "backups"), filepath.Join(s.Root, "transactions"), filepath.Join(s.Root, "nginx-templates")}
+	return []string{s.Root, s.SitesPath(), filepath.Join(s.Root, "generated"), filepath.Join(s.Root, "shell"), filepath.Join(s.Root, "transactions"), filepath.Join(s.Root, "nginx-templates")}
 }
 
 // Load is read-only. It validates every managed state file before returning a
-// snapshot, and never migrates or canonicalizes files on disk.
+// snapshot and never canonicalizes files on disk.
 func (s *Store) Load() (Snapshot, error) {
 	if err := checkPrivateDir(s.Root); err != nil {
 		return Snapshot{}, err
@@ -105,6 +107,9 @@ func (s *Store) Load() (Snapshot, error) {
 			if readErr != nil {
 				return Snapshot{}, newStateError("invalid_handler", "cannot read custom handler", readErr)
 			}
+			if validateErr := nginxsnippet.Validate(string(content)); validateErr != nil {
+				return Snapshot{}, newStateError("invalid_handler", "custom handler is not a permitted location snippet", validateErr)
+			}
 			site.Nginx.Handler.Content = string(content)
 		}
 		if e.Name() != site.ID+".yaml" {
@@ -122,7 +127,11 @@ func (s *Store) Load() (Snapshot, error) {
 // fails, original state files are restored from private in-memory copies; this
 // provides all-or-nothing snapshot semantics until Stage 5 adds a durable
 // transaction journal around rebuilds.
-func (s *Store) WriteSnapshot(snap Snapshot) (err error) {
+func (s *Store) WriteSnapshot(snap Snapshot) error {
+	return securefs.WithPrivateUmask(func() error { return s.writeSnapshot(snap) })
+}
+
+func (s *Store) writeSnapshot(snap Snapshot) (err error) {
 	snap.Canonicalize()
 	if err := snap.Validate(); err != nil {
 		return err
@@ -246,16 +255,6 @@ func (s *Store) restoreStateFiles(files map[string][]byte, exists map[string]boo
 func (s *Store) Canonicalize() error {
 	snap, err := s.Load()
 	if err != nil {
-		return err
-	}
-	return s.WriteSnapshot(snap)
-}
-func (s *Store) MigrateForWrite() error {
-	snap, err := s.Load()
-	if err != nil {
-		return err
-	}
-	if _, err := s.BackupForMigration(); err != nil {
 		return err
 	}
 	return s.WriteSnapshot(snap)

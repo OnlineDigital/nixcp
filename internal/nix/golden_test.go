@@ -18,7 +18,7 @@ const goldenProject = "/home"
 
 func TestRendererV1GoldenScenarios(t *testing.T) {
 	base := state.ConfigSnapshot{
-		SchemaVersion: 1,
+		SchemaVersion: 2,
 		Owner:         state.Owner{Username: "nixcp", Group: "users", Home: "/home/nixcp"},
 		Platform:      state.Platform{System: "x86_64-linux"},
 		Rebuild:       state.RebuildConfig{Mode: "traditional"},
@@ -37,8 +37,9 @@ func TestRendererV1GoldenScenarios(t *testing.T) {
 		{"empty", "module-marker", emptyConfig(base), nil},
 		{"services", "services.redis.servers.nixcp", withServices(base), nil},
 		{"php", "pkgs.php84.withExtensions", base, nil},
-		{"sites", "virtualHosts.\"example.test\"", withNginx(base), []state.SiteConfig{{SchemaVersion: 1, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.4", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
-		{"escaping", `\${not-nix}`, withNginx(base), []state.SiteConfig{{SchemaVersion: 1, ID: "escape-test", Enabled: true, Domain: "escape.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
+		{"sites", "virtualHosts.\"example.test\"", withNginx(base), []state.SiteConfig{{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.4", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
+		{"mariadb", "systemd.services.nixcp-mariadb-accounts", withMariaDB(base), []state.SiteConfig{{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.4", MariaDB: &state.MariaDBConfig{Database: "app", User: "app", Password: "nixcpfixturepass123456"}, Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
+		{"escaping", `\${not-nix}`, withNginx(base), []state.SiteConfig{{SchemaVersion: 2, ID: "escape-test", Enabled: true, Domain: "escape.test", ProjectPath: goldenProject, DocumentRoot: goldenProject, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "template", Name: "laravel"}}}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,6 +123,12 @@ func withServices(c state.ConfigSnapshot) state.ConfigSnapshot {
 	c.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "stopped"}
 	c.Services.MariaDB = state.ServiceConfig{Installed: true, DesiredState: "running"}
 	c.Services.Redis = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	c.MariaDBRegistry.Databases = []string{"app"}
+	return c
+}
+func withMariaDB(c state.ConfigSnapshot) state.ConfigSnapshot {
+	c.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	c.Services.MariaDB = state.ServiceConfig{Installed: true, DesiredState: "running"}
 	c.MariaDBRegistry.Databases = []string{"app"}
 	return c
 }

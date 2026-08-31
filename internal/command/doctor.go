@@ -10,6 +10,7 @@ import (
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/output"
+	"github.com/nixcp/nixcp/internal/service"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
@@ -63,6 +64,7 @@ func runDoctor(cmd *cobra.Command, runtime Runtime) error {
 		return emitDoctor(cmd, report)
 	}
 	report.Configured = true
+	checks = append(checks, doctorCheck{Name: "config", Status: "pass", Detail: fmt.Sprintf("validated schema %d configuration and %d site records", snap.Config.SchemaVersion, len(snap.Sites))})
 
 	// 2. Static artifacts referenced by the rendered module.
 	if moduleErr := checkStaticArtifacts(store); moduleErr != nil {
@@ -78,9 +80,35 @@ func runDoctor(cmd *cobra.Command, runtime Runtime) error {
 	// 4. Rebuild toolchain on PATH (nixos-rebuild binary present).
 	checks = append(checks, checkToolchain(cmd.Context(), runtime))
 
+	// 5. Confirm each configured service matches the state that will be
+	// rendered into NixOS. Systemd can be absent on a development machine, so
+	// an unavailable probe is a warning rather than a misleading failure.
+	checks = append(checks, checkServiceDiagnostics(cmd, runtime, snap.Config)...)
+
 	report.Healthy = allPassed(checks)
 	report.Checks = checks
 	return emitDoctor(cmd, report)
+}
+
+func checkServiceDiagnostics(cmd *cobra.Command, runtime Runtime, config state.ConfigSnapshot) []doctorCheck {
+	statuses := collectServiceStatus(cmd, runtime, config)
+	checks := make([]doctorCheck, 0, len(statuses))
+	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Redis} {
+		status := statuses[string(name)]
+		check := doctorCheck{Name: "service." + string(name)}
+		if status.Actual == nil {
+			check.Status = "warn"
+			check.Detail = "actual state unavailable: " + status.Error
+		} else if *status.Drift {
+			check.Status = "fail"
+			check.Detail = fmt.Sprintf("desired=%s installed=%t but active=%t enabled=%t health=%s", status.Desired.DesiredState, status.Desired.Installed, status.Actual.Active, status.Actual.Enabled, status.Actual.Health)
+		} else {
+			check.Status = "pass"
+			check.Detail = fmt.Sprintf("desired state matches active=%t enabled=%t", status.Actual.Active, status.Actual.Enabled)
+		}
+		checks = append(checks, check)
+	}
+	return checks
 }
 
 func emitDoctor(cmd *cobra.Command, report doctorReport) error {

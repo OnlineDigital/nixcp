@@ -61,7 +61,7 @@ Coduri de exit pe clase:
 | 8 | rollback incomplet |
 | 9 | execuție runtime internă |
 
-Pentru `ncp php ...` și `ncp artisan ...`, exit code-ul procesului PHP este propagat neschimbat; codurile de mai sus se aplică numai erorilor NixCP înainte de execuție.
+Pentru `ncp php ...`, `ncp artisan ...` și `ncp composer ...`, exit code-ul procesului PHP (respectiv al lui Composer) este propagat neschimbat; codurile de mai sus se aplică numai erorilor NixCP înainte de execuție.
 
 ## Arbore de comenzi
 
@@ -77,6 +77,7 @@ ncp php use <version>
 ncp php use --global <version>
 ncp php [php-args...]
 ncp artisan [artisan-args...]
+ncp composer [composer-args...]
 ncp link <domain> [flags]
 ncp unlink <domain-or-site-id>
 ncp sites list
@@ -170,9 +171,11 @@ ncp php script.php --flag value
 ncp php ./vendor/bin/tool
 ncp artisan make:controller UserController
 ncp artisan tinker
+ncp composer install --no-dev
+ncp composer require laravel/ui
 ```
 
-Argumentele sunt transmise identic, fără shell intermediar. `ncp artisan` cere ca `./artisan` să fie regular/readable și execută echivalentul `php ./artisan ...`. Semnalele și exit code-ul sunt propagate.
+Argumentele sunt transmise identic, fără shell intermediar. `ncp artisan` cere ca `./artisan` să fie regular/readable și execută echivalentul `php ./artisan ...`. Semnalele și exit code-ul sunt propagate. `ncp composer` rulează același resolver PHP (calea stabilă din sesiunea/proiectul curent) peste scriptul sistem-own de la `/etc/nixcp/composer/bin/composer`; argumentele îi sunt transmise verbatim, iar exit code-ul Composer este returnat neschimbat — util pentru scripturi bazate pe Composer din proiecte PHP.
 
 ### Link site
 

@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nixcp/nixcp/internal/database"
 	apperrors "github.com/nixcp/nixcp/internal/errors"
+	"github.com/nixcp/nixcp/internal/nginxsnippet"
 	"github.com/nixcp/nixcp/internal/output"
 	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/state"
@@ -138,7 +140,7 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 		if !snap.Config.Services.MariaDB.Installed || snap.Config.Services.MariaDB.DesiredState != "running" {
 			return apperrors.New("mariadb_not_running", "MariaDB must be installed and running", "Run: ncp service mariadb install", apperrors.ExitCodePrecond)
 		}
-		maria = &state.MariaDBConfig{Database: db}
+		maria = &state.MariaDBConfig{Database: db, User: db, Password: state.GenerateDatabasePassword()}
 		if !containsString(snap.Config.MariaDBRegistry.Databases, db) {
 			snap.Config.MariaDBRegistry.Databases = append(snap.Config.MariaDBRegistry.Databases, db)
 		}
@@ -147,7 +149,7 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 	for _, s := range snap.Sites {
 		ids[s.ID] = struct{}{}
 	}
-	site := state.SiteConfig{SchemaVersion: 1, ID: state.GenerateStableSiteID(domain, ids), Enabled: true, Domain: domain, ProjectPath: project, DocumentRoot: root, PHP: phpVersion, MariaDB: maria, Nginx: state.NginxConfig{Handler: handler}}
+	site := state.SiteConfig{SchemaVersion: 2, ID: state.GenerateStableSiteID(domain, ids), Enabled: true, Domain: domain, ProjectPath: project, DocumentRoot: root, PHP: phpVersion, MariaDB: maria, Nginx: state.NginxConfig{Handler: handler}}
 	snap.Sites = append(snap.Sites, site)
 	snap.Canonicalize()
 	if err := snap.Validate(); err != nil {
@@ -193,27 +195,7 @@ func canonicalFile(p string) (string, error) {
 	return filepath.Clean(a), nil
 }
 func validateSnippet(s string) error {
-	forbidden := []string{"server", "http", "events", "listen", "server_name", "root", "include", "upstream", "ssl", "certificate", "acme", "fastcgi_pass"}
-	for n, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(strings.Split(line, "#")[0])
-		if line == "" {
-			continue
-		}
-		f := strings.Fields(line)
-		if len(f) == 0 {
-			continue
-		}
-		d := strings.ToLower(f[0])
-		for _, x := range forbidden {
-			if d == x || strings.HasPrefix(d, x+"_") {
-				return fmt.Errorf("line %d: directive %s is forbidden", n+1, d)
-			}
-		}
-		if strings.Contains(line, "{") || strings.Contains(line, "}") {
-			return fmt.Errorf("line %d: blocks are forbidden", n+1)
-		}
-	}
-	return nil
+	return nginxsnippet.Validate(s)
 }
 func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap state.Snapshot, deletes []string, action string, site state.SiteConfig) error {
 	module, e := runtime.Renderer.Render(snap)
@@ -232,24 +214,94 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 		}
 		files[filepath.Join("sites", s.ID+".yaml")] = b
 	}
+	// Keep the 0600 MariaDB grants file (which holds the per-site passwords) in
+	// sync: written when a site declares a database, removed when none do.
+	{
+		secretFiles, secretDeletes := mariaDBSecretFiles(snap)
+		for k, v := range secretFiles {
+			files[k] = v
+		}
+		deletes = append(deletes, secretDeletes...)
+	}
 	manager := runtime.Transactions
 	if manager == nil {
-		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, desiredHealth{systemd: runtime.Services, name: "nginx", running: true})
+		dbCheck := runtime.DatabaseCheck
+		dbCheck = credentialedDatabaseCheck(dbCheck, snap.Sites)
+		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, transaction.CompositeHealth{
+			desiredHealth{systemd: runtime.Services, name: "nginx", running: true},
+			siteTransactionHealth(runtime, snap),
+			dbCheck,
+		})
 	}
-	result, e := manager.Apply(cmd.Context(), transaction.Request{Files: files, Deletes: deletes, CandidateModule: "generated/nixcp-module.nix", Affected: []string{"nginx"}})
+	affected := []string{"nginx", "nginx-config"}
+	if action == "link" {
+		affected = append(affected, "site:"+site.ID)
+		if site.MariaDB != nil {
+			affected = append(affected, "database:"+site.MariaDB.Database)
+		}
+	}
+	result, e := manager.Apply(cmd.Context(), transaction.Request{Files: files, Deletes: deletes, CandidateModule: "generated/nixcp-module.nix", Affected: affected})
 	if e != nil {
 		return transactionError(e)
 	}
 	data := map[string]any{"id": site.ID, "domain": site.Domain, "php": site.PHP, "documentRoot": site.DocumentRoot, "handler": site.Nginx.Handler.Type, "phase": result.Phase}
 	if site.MariaDB != nil {
-		data["mariadb"] = site.MariaDB.Database
+		data["mariadb"] = map[string]any{"database": site.MariaDB.Database, "user": site.MariaDB.User, "password": site.MariaDB.Password}
 	}
 	if commandJSON(cmd) {
 		return emitJSON(cmd, output.Success(action, result.Changed, data, nil))
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
+	if site.MariaDB != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "  database: %s (user: %s, password: %s)\n", site.MariaDB.Database, site.MariaDB.User, site.MariaDB.Password)
+	}
 	return nil
 }
+
+// credentialedDatabaseCheck decorates the runtime MariaDB checker with the
+// site-specific credentials (when known) so the post-switch health phase
+// verifies each declared database as its own dedicated account, proving the
+// generated user and password actually work on the switched system. Injected
+// test fakes and custom checkers are left untouched.
+func credentialedDatabaseCheck(check database.Checker, sites []state.SiteConfig) database.Checker {
+	creds := map[string]database.DBCredentials{}
+	for _, s := range sites {
+		if s.MariaDB == nil {
+			continue
+		}
+		creds[s.MariaDB.Database] = database.DBCredentials{Database: s.MariaDB.Database, User: s.MariaDB.User, Password: s.MariaDB.Password}
+	}
+	if len(creds) == 0 {
+		return check
+	}
+	if local, ok := check.(database.LocalChecker); ok {
+		local.Credentials = creds
+		return local
+	}
+	if localPtr, ok := check.(*database.LocalChecker); ok {
+		local := *localPtr
+		local.Credentials = creds
+		return &local
+	}
+	return check
+}
+
+func siteTransactionHealth(runtime Runtime, snap state.Snapshot) sitepkg.TransactionHealth {
+	sites := make(map[string]state.SiteConfig, len(snap.Sites))
+	for _, s := range snap.Sites {
+		sites[s.ID] = s
+	}
+	checker := runtime.SiteChecker
+	if checker == nil {
+		checker = sitepkg.RealChecker{}
+	}
+	config := runtime.NginxConfig
+	if config == nil {
+		config = sitepkg.NginxConfigVerifier{Runner: runtime.Runner}
+	}
+	return sitepkg.TransactionHealth{Config: config, Checker: checker, Sites: sites}
+}
+
 func newUnlinkCommand(runtime Runtime) *cobra.Command {
 	return &cobra.Command{Use: "unlink <domain-or-site-id>", Short: "Remove a site", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return runUnlink(c, runtime, a[0]) }}
 }
@@ -310,7 +362,15 @@ func runSitesList(cmd *cobra.Command, runtime Runtime) error {
 		return emitJSON(cmd, output.Success("sites.list", false, map[string]any{"sites": snap.Sites}, nil))
 	}
 	for _, s := range snap.Sites {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s %s php=%s root=%s\n", s.ID, s.Domain, s.PHP, s.DocumentRoot)
+		handler := s.Nginx.Handler.Type
+		if handler == "template" && s.Nginx.Handler.Name != "" {
+			handler = "template:" + s.Nginx.Handler.Name
+		}
+		line := fmt.Sprintf("%s %s enabled=%t php=%s root=%s handler=%s", s.ID, s.Domain, s.Enabled, s.PHP, s.DocumentRoot, handler)
+		if s.MariaDB != nil {
+			line += " db=" + s.MariaDB.Database
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), line)
 	}
 	return nil
 }
@@ -335,6 +395,9 @@ func runSitesShow(cmd *cobra.Command, runtime Runtime, key string) error {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", s.ID, s.Domain)
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", health.Describe())
+			if s.MariaDB != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  database: %s (user: %s, password: %s)\n", s.MariaDB.Database, s.MariaDB.User, s.MariaDB.Password)
+			}
 			return nil
 		}
 	}

@@ -10,7 +10,7 @@ Validarea completă de la modele Go până la un NixOS VM activ și definirea or
 
 ### Unit tests Go
 
-- strict YAML, duplicate keys, round-trip și migrations;
+- strict YAML, duplicate keys și round-trip;
 - domenii, IDs, paths, DB identifiers;
 - PHP version resolution și `.php-version` precedence;
 - extension compatibility și warning aggregation;
@@ -133,7 +133,7 @@ Cobra, DI, output JSON/human, errors, fakes și build metadata. `help/version/st
 
 ### M2 — state engine
 
-Layout, strict YAML, validators, ownership checks, migrations, deterministic encoding.
+Layout, strict YAML, validators, ownership checks, deterministic encoding.
 
 ### M3 — renderer și bootstrap
 
@@ -165,7 +165,7 @@ Security corpus, VM suite, doctor, docs operaționale și release candidate.
 
 ### M10 — v1.0
 
-Toate acceptance criteria, upgrade/migration test, package/release/checksums și changelog.
+Toate acceptance criteria, package/release/checksums și changelog.
 
 ## Release artifacts
 
@@ -183,7 +183,7 @@ Toate acceptance criteria, upgrade/migration test, package/release/checksums și
 ## Compatibilitate și upgrade
 
 - semantic versioning pentru CLI și schema;
-- schema migration înainte de mutație, cu backup;
+- schemaVersion: 2 este validat înainte de orice mutație;
 - generated module se regenerează;
 - versiunea veche de binar refuză schema nouă;
 - release-ul fixează/testează o bază nixpkgs și documentează politica de actualizare;

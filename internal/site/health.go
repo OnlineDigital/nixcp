@@ -8,6 +8,9 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/state"
 )
 
 // HealthTimeout bounds each individual site probe.
@@ -29,6 +32,87 @@ type HealthStatus struct {
 // Implementations must be non-destructive.
 type Checker interface {
 	CheckSite(ctx context.Context, domain, siteID string, desiredEnabled bool) HealthStatus
+}
+
+// ConfigVerifier validates the Nginx configuration selected by the active
+// system profile. It is separate from Checker so transaction tests can inject
+// deterministic probes without requiring a host Nginx installation.
+type ConfigVerifier interface {
+	Verify(context.Context) error
+}
+
+// NginxConfigVerifier invokes nginx directly with fixed argv. nginx -t reads
+// the active default configuration and does not reload or otherwise mutate it.
+type NginxConfigVerifier struct{ Runner execx.Runner }
+
+func (v NginxConfigVerifier) Verify(ctx context.Context) error {
+	if v.Runner == nil {
+		return fmt.Errorf("nginx configuration verifier is not configured")
+	}
+	result, err := v.Runner.Run(ctx, &execx.Command{Name: "nginx", Args: []string{"-t"}, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
+	if err != nil || result.ExitCode != 0 {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(result.Stdout)
+		}
+		if detail != "" {
+			return fmt.Errorf("nginx active configuration check failed: %s", detail)
+		}
+		if err != nil {
+			return fmt.Errorf("nginx active configuration check failed: %w", err)
+		}
+		return fmt.Errorf("nginx active configuration check failed")
+	}
+	return nil
+}
+
+// TransactionHealth is the production Health.Check adapter for linked sites.
+// It only probes resources marked as site:<stable-id>, so unrelated
+// transactions do not require a live Nginx or PHP-FPM installation.
+// nginx-config asks it to validate the active Nginx configuration without an
+// HTTP probe (used by unlink transactions).
+type TransactionHealth struct {
+	Config  ConfigVerifier
+	Checker Checker
+	Sites   map[string]state.SiteConfig
+}
+
+func (h TransactionHealth) Check(ctx context.Context, affected []string) error {
+	siteIDs := make([]string, 0)
+	checkConfig := false
+	for _, resource := range affected {
+		if resource == "nginx-config" {
+			checkConfig = true
+			continue
+		}
+		if id, ok := strings.CutPrefix(resource, "site:"); ok {
+			if id == "" {
+				return fmt.Errorf("site health received an empty site resource")
+			}
+			siteIDs = append(siteIDs, id)
+			checkConfig = true
+		}
+	}
+	if !checkConfig {
+		return nil
+	}
+	if h.Config == nil || h.Checker == nil {
+		return fmt.Errorf("site transaction health is not configured")
+	}
+	if err := h.Config.Verify(ctx); err != nil {
+		return err
+	}
+	for _, id := range siteIDs {
+		s, ok := h.Sites[id]
+		if !ok {
+			return fmt.Errorf("site health received unknown site %q", id)
+		}
+		status := h.Checker.CheckSite(ctx, s.Domain, s.ID, s.Enabled)
+		if !status.DesiredOn || !status.SocketOK || !status.HTTPOK || status.ProblemCode != "" {
+			return fmt.Errorf("site health failed: %s", status.Describe())
+		}
+	}
+	return nil
 }
 
 // RealChecker probes the local runtime without sudo: the PHP-FPM socket and

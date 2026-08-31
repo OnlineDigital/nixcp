@@ -2,7 +2,7 @@
 
 ## Obiectiv și dependențe
 
-Definirea sursei adevărului, a serializării stricte, a validărilor locale/cross-file și a strategiei de migrare.
+Definirea sursei adevărului, a serializării stricte, a validărilor locale/cross-file și a validării stricte a versiunii schemei.
 
 **Depinde de:** 01–02.  
 **Deblochează:** renderer-ul Nix și toate mutațiile persistente.
@@ -17,10 +17,10 @@ Definirea sursei adevărului, a serializării stricte, a validărilor locale/cro
 - Întreg snapshot-ul este validat înainte de orice mutație.
 - Nu se acceptă symlink-uri pentru fișierele managed.
 
-## `config.yaml` v1
+## `config.yaml` v2
 
 ```yaml
-schemaVersion: 1
+schemaVersion: 2
 owner:
   username: alice
   uid: 1000
@@ -57,7 +57,7 @@ Owner-ul este capturat la install și nu este o opțiune liber editabilă fără
 Laravel:
 
 ```yaml
-schemaVersion: 1
+schemaVersion: 2
 id: example-com
 enabled: true
 domain: example.com
@@ -75,7 +75,7 @@ nginx:
 WordPress fără DB gestionată explicit:
 
 ```yaml
-schemaVersion: 1
+schemaVersion: 2
 id: blog-example-com
 enabled: true
 domain: blog.example.com
@@ -91,7 +91,7 @@ nginx:
 Custom:
 
 ```yaml
-schemaVersion: 1
+schemaVersion: 2
 id: app-example-com
 enabled: true
 domain: app.example.com
@@ -162,14 +162,11 @@ Comanda care propune o stare intermediar invalidă trebuie să ofere o eroare pr
 
 Fișierul `.php-version` este în proiect și nu face parte din snapshot-ul `~/.nixcp`; conține exact o versiune normalizată și newline.
 
-## Migrare
+## Versiunea schemei
 
-- fiecare document are `schemaVersion`;
-- loader-ul nu scrie automat în timpul unei comenzi read-only;
-- mutațiile detectează versiunea veche, creează backup și migrează tranzacțional;
-- downgrade-ul către un binar ce nu înțelege schema eșuează fără modificări;
-- migrarea trebuie să fie idempotentă și testată cu fixtures;
-- generated Nix nu se migrează, se regenerează.
+- fiecare document are `schemaVersion: 2`;
+- loader-ul și mutațiile resping orice altă versiune fără a modifica starea;
+- generated Nix se regenerează din starea validată.
 
 ## Chei interzise prin design
 
@@ -183,7 +180,7 @@ Schema nu are loc pentru TLS/certificate/ACME, DNS, email, web UI, worktree, DB 
 4. Implementează loader-ul snapshot integral.
 5. Implementează cross-validation.
 6. Implementează encoder-ul canonic și ID generation.
-7. Adaugă schema migration interface și v1 no-op migration.
+7. Validează strict schemaVersion: 2 pentru toate documentele de stare.
 8. Adaugă ownership/perms hooks pentru etapa 09.
 
 ## Criterii de acceptanță

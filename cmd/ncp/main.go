@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"syscall"
 
 	"github.com/nixcp/nixcp/internal/command"
 )
@@ -15,6 +16,11 @@ var (
 )
 
 func main() {
+	// NixCP creates state, generated configuration, locks, journals, and local
+	// PHP markers. Keep every process-created object private by default; the
+	// narrow helpers used by library paths apply the same policy when main is
+	// not the entry point.
+	syscall.Umask(0077)
 	version := Version
 	if version == "" {
 		version = "0.0.0"

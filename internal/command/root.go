@@ -8,12 +8,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nixcp/nixcp/internal/database"
 	"github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/nix"
 	"github.com/nixcp/nixcp/internal/output"
 	"github.com/nixcp/nixcp/internal/platform"
 	"github.com/nixcp/nixcp/internal/service"
+	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/transaction"
 	"github.com/spf13/cobra"
 )
@@ -29,13 +31,16 @@ type BuildMetadata struct {
 
 // Runtime holds injected stage-2 adapters.
 type Runtime struct {
-	Runner       execx.Runner
-	Metadata     BuildMetadata
-	Platform     platform.Inspector
-	Renderer     nix.Renderer
-	Services     service.Systemd
-	Transactions *transaction.Manager
-	StateHome    string // test-only override; production uses the current user's home.
+	Runner        execx.Runner
+	Metadata      BuildMetadata
+	Platform      platform.Inspector
+	Renderer      nix.Renderer
+	Services      service.Systemd
+	SiteChecker   sitepkg.Checker
+	NginxConfig   sitepkg.ConfigVerifier
+	DatabaseCheck database.Checker
+	Transactions  *transaction.Manager
+	StateHome     string // test-only override; production uses the current user's home.
 }
 
 // WithStateHome injects an isolated state home for tests.
@@ -71,6 +76,33 @@ func WithServices(s service.Systemd) RuntimeOption {
 	}
 }
 
+// WithSiteChecker injects the local site probe used after link transactions.
+func WithSiteChecker(c sitepkg.Checker) RuntimeOption {
+	return func(rt *Runtime) {
+		if c != nil {
+			rt.SiteChecker = c
+		}
+	}
+}
+
+// WithNginxConfigVerifier injects the active-Nginx configuration verifier.
+func WithNginxConfigVerifier(v sitepkg.ConfigVerifier) RuntimeOption {
+	return func(rt *Runtime) {
+		if v != nil {
+			rt.NginxConfig = v
+		}
+	}
+}
+
+// WithDatabaseChecker injects declared-database verification.
+func WithDatabaseChecker(c database.Checker) RuntimeOption {
+	return func(rt *Runtime) {
+		if c != nil {
+			rt.DatabaseCheck = c
+		}
+	}
+}
+
 // WithBuildMetadata injects version/build metadata.
 func WithBuildMetadata(meta BuildMetadata) RuntimeOption {
 	return func(rt *Runtime) {
@@ -90,14 +122,18 @@ type ApplicationRoot struct {
 }
 
 func defaultRuntime() Runtime {
+	runner := &execx.RealRunner{}
 	return Runtime{
-		Runner: &execx.RealRunner{},
+		Runner: runner,
 		Metadata: BuildMetadata{
 			Version: defaultVersion,
 		},
-		Platform: platform.HostInspector{},
-		Renderer: nix.Renderer{},
-		Services: service.Adapter{Runner: &execx.RealRunner{}},
+		Platform:      platform.HostInspector{},
+		Renderer:      nix.Renderer{},
+		Services:      service.Adapter{Runner: runner},
+		SiteChecker:   sitepkg.RealChecker{},
+		NginxConfig:   sitepkg.NginxConfigVerifier{Runner: runner},
+		DatabaseCheck: database.LocalChecker{Runner: runner},
 	}
 }
 
@@ -190,6 +226,7 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newServiceAliasCommand(runtime, service.Redis))
 	root.AddCommand(newPHPCommand(runtime))
 	root.AddCommand(newArtisanCommand(runtime))
+	root.AddCommand(newComposerCommand(runtime))
 	root.AddCommand(newLinkCommand(runtime))
 	root.AddCommand(newUnlinkCommand(runtime))
 	root.AddCommand(newSitesCommand(runtime))

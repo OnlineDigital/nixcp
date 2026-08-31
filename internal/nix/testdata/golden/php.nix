@@ -3,6 +3,7 @@
 { lib, pkgs, ... }: {
   assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux"; message = "NixCP requires x86_64-linux"; }];
   environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
+  environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/bin/composer";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
   environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ phpExtensions.intl phpExtensions.redis ]))}/bin/php";
 }

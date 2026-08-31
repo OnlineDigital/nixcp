@@ -25,7 +25,7 @@ Versiunile dependențelor se fixează în `go.mod`/`go.sum`; actualizarea lor es
 cmd/ncp/main.go
 internal/cli/          # construcția Cobra, flags, completions
 internal/command/      # use-case orchestration
-internal/state/        # modele YAML, loader, migrations
+internal/state/        # modele YAML și loader
 internal/site/         # reguli site/domain/path
 internal/php/          # versiuni, extensii, active resolution
 internal/service/      # lifecycle desired/actual

@@ -2,7 +2,7 @@ package state
 
 import "fmt"
 
-// StateError represents a deterministic validation/migration error for state files.
+// StateError represents a deterministic validation error for state files.
 type StateError struct {
 	Code    string
 	Message string

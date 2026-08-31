@@ -9,7 +9,7 @@ import (
 
 func TestValidateSiteRejectsDocumentRootOutsideProject(t *testing.T) {
 	project, outside := t.TempDir(), t.TempDir()
-	site := SiteConfig{SchemaVersion: 1, ID: "example", Domain: "example.test", ProjectPath: project, DocumentRoot: outside, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "generic"}}}
+	site := SiteConfig{SchemaVersion: 2, ID: "example", Domain: "example.test", ProjectPath: project, DocumentRoot: outside, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "generic"}}}
 	if err := ValidateSite(site); err == nil || !strings.Contains(err.Error(), "documentRoot") {
 		t.Fatalf("expected root containment rejection, got %v", err)
 	}
@@ -21,9 +21,33 @@ func TestValidateSiteRejectsOversizedCustomSnippet(t *testing.T) {
 	if err := os.WriteFile(snippet, make([]byte, maxCustomSnippetBytes+1), 0600); err != nil {
 		t.Fatal(err)
 	}
-	site := SiteConfig{SchemaVersion: 1, ID: "example", Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "custom", Path: snippet}}}
+	site := SiteConfig{SchemaVersion: 2, ID: "example", Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "custom", Path: snippet}}}
 	if err := ValidateSite(site); err == nil {
 		t.Fatal("expected oversized snippet rejection")
+	}
+}
+
+func TestValidateSiteRejectsUnsafeCustomSnippetContent(t *testing.T) {
+	project := t.TempDir()
+	snippet := filepath.Join(project, "snippet.conf")
+	if err := os.WriteFile(snippet, []byte("include /tmp/evil.conf;"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	site := SiteConfig{SchemaVersion: 2, ID: "example", Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "custom", Path: snippet}}}
+	if err := ValidateSite(site); err == nil {
+		t.Fatal("expected unsafe custom snippet rejection")
+	}
+}
+
+func TestValidateSiteRejectsUnsafeLoadedCustomSnippetContent(t *testing.T) {
+	project := t.TempDir()
+	snippet := filepath.Join(project, "snippet.conf")
+	if err := os.WriteFile(snippet, []byte("try_files $uri =404;"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	site := SiteConfig{SchemaVersion: 2, ID: "example", Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: NginxConfig{Handler: HandlerConfig{Type: "custom", Path: snippet, Content: "server { listen 80; }"}}}
+	if err := ValidateSite(site); err == nil {
+		t.Fatal("expected unsafe in-memory custom snippet rejection")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/output"
+	rebuildpkg "github.com/nixcp/nixcp/internal/rebuild"
 	"github.com/nixcp/nixcp/internal/service"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/nixcp/nixcp/internal/transaction"
@@ -99,7 +100,12 @@ func runService(cmd *cobra.Command, runtime Runtime, name service.Name, action s
 	if manager == nil {
 		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, desiredHealth{systemd: runtime.Services, name: name, running: cfg.DesiredState == "running"})
 	}
-	result, err := manager.Apply(cmd.Context(), transaction.Request{Files: map[string][]byte{"config.yaml": configBytes, "generated/nixcp-module.nix": module}, CandidateModule: "generated/nixcp-module.nix", Affected: []string{string(name)}})
+	secretFiles, _ := mariaDBSecretFiles(snap)
+	files := map[string][]byte{"config.yaml": configBytes, "generated/nixcp-module.nix": module}
+	for k, v := range secretFiles {
+		files[k] = v
+	}
+	result, err := manager.Apply(cmd.Context(), transaction.Request{Files: files, CandidateModule: "generated/nixcp-module.nix", Affected: []string{string(name)}})
 	if err != nil {
 		return transactionError(err)
 	}
@@ -190,7 +196,7 @@ func defaultServiceTransaction(root string, rt Runtime, rebuild state.RebuildCon
 			args = append(args, "--impure")
 		}
 	}
-	return &transaction.Manager{Root: root, Locker: transaction.FlockLocker{Path: filepath.Join(root, "lock")}, Rebuilder: transaction.NixOSRebuilder{Runner: rt.Runner, SwitchArgs: args}, Health: health}
+	return &transaction.Manager{Root: root, Locker: transaction.FlockLocker{Path: filepath.Join(root, "lock")}, Rebuilder: rebuildpkg.NixOS{Runner: rt.Runner, SwitchArgs: args}, Health: health}
 }
 func systemdError(err error) error {
 	return apperrors.New("systemd_error", err.Error(), "Inspect the unit journal and retry", apperrors.ExitCodeHealth)

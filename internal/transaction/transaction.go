@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nixcp/nixcp/internal/securefs"
 	"gopkg.in/yaml.v3"
 )
 
@@ -168,6 +169,22 @@ type Rebuilder interface {
 }
 type HealthChecker interface {
 	Check(context.Context, []string) error
+}
+
+// CompositeHealth runs all configured non-mutating verification adapters.
+// Each adapter decides whether the affected resource set concerns it.
+type CompositeHealth []HealthChecker
+
+func (h CompositeHealth) Check(ctx context.Context, affected []string) error {
+	for _, checker := range h {
+		if checker == nil {
+			continue
+		}
+		if err := checker.Check(ctx, affected); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Manager publishes a map of private files relative to Root. A missing old file
@@ -371,7 +388,8 @@ func safeRelative(p string) bool {
 func validateDeletes(deletes []string) error {
 	seen := map[string]struct{}{}
 	for _, p := range deletes {
-		if !safeRelative(p) || p == "config.yaml" || p == "generated/nixcp-module.nix" || !strings.HasPrefix(p, "sites/") || filepath.Ext(p) != ".yaml" {
+		allowed := (strings.HasPrefix(p, "sites/") && filepath.Ext(p) == ".yaml") || (strings.HasPrefix(p, "secrets/") && filepath.Ext(p) == ".sql")
+		if !safeRelative(p) || p == "config.yaml" || p == "generated/nixcp-module.nix" || !allowed {
 			return fmt.Errorf("unsafe managed delete path %q", p)
 		}
 		if _, ok := seen[p]; ok {
@@ -504,6 +522,10 @@ func filesFromHashes(h map[string]string) map[string][]byte {
 	return out
 }
 func writeAtomic(path string, b []byte) error {
+	return securefs.WithPrivateUmask(func() error { return writeAtomicPrivate(path, b) })
+}
+
+func writeAtomicPrivate(path string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}

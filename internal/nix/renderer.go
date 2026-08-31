@@ -2,7 +2,10 @@
 package nix
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -32,6 +35,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	b.WriteString("  assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == \"x86_64-linux\"; message = \"NixCP requires x86_64-linux\"; }];\n")
 	b.WriteString("  environment.etc.\"nixcp/module-marker\".text = \"" + Marker + "\\n\";\n")
 	renderServices(&b, s.Config)
+	renderMariaDBAccounts(&b, s.Config, s.Sites)
 	renderPHP(&b, s.Config)
 	for _, site := range sortedSites(s.Sites) {
 		renderSite(&b, site, s.Config.Owner.Username)
@@ -73,7 +77,71 @@ func renderServicePolicy(b *strings.Builder, unit string, svc state.ServiceConfi
 	}
 }
 
+// nixcpMariaDBSecretPath is the absolute path of the private, 0600 SQL file
+// that carries the per-site MariaDB account grants. It lives under the owner's
+// state directory (never in the world-readable Nix store) so the generated
+// module does not contain any password.
+func nixcpMariaDBSecretPath(home string) string {
+	return filepath.Join(home, ".nixcp", "secrets", "mariadb", "accounts.sql")
+}
+
+// MariaDBAccountsSQL returns the deterministic, idempotent SQL that provisions
+// a dedicated account (user = database name) per site database. It is empty
+// when no site declares a database. The SQL is written to a private file (see
+// nixcpMariaDBSecretPath) and executed by the generated oneshot unit via stdin;
+// it is never embedded in the module.
+func MariaDBAccountsSQL(c state.ConfigSnapshot, sites []state.SiteConfig) string {
+	seen := map[string]bool{}
+	var sql strings.Builder
+	for _, site := range sortedSites(sites) {
+		if site.MariaDB == nil || seen[site.MariaDB.Database] {
+			continue
+		}
+		seen[site.MariaDB.Database] = true
+		fmt.Fprintf(&sql, "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n", site.MariaDB.User, site.MariaDB.Password, site.MariaDB.User, site.MariaDB.Password, site.MariaDB.Database, site.MariaDB.User)
+	}
+	return sql.String()
+}
+
+// renderMariaDBAccounts emits a deterministic oneshot unit that provisions a
+// dedicated account (user = database name) per site database, idempotently. It
+// runs after mysql.service and only when MariaDB is installed and desired
+// running. The password stays in a private 0600 SQL file under ~/.nixcp and is
+// never written into the world-readable Nix store here: the unit only references
+// the path to that file and feeds it to mariadb via stdin. The comment carries a
+// SHA-256 of the SQL so a password rotation changes the unit text and re-triggers
+// the idempotent ALTER USER on the next switch (RemainAfterExit restart).
+func renderMariaDBAccounts(b *strings.Builder, c state.ConfigSnapshot, sites []state.SiteConfig) {
+	if !c.Services.MariaDB.Installed || c.Services.MariaDB.DesiredState != "running" {
+		return
+	}
+	sql := MariaDBAccountsSQL(c, sites)
+	if sql == "" {
+		return
+	}
+	sum := sha256.Sum256([]byte(sql))
+	hash := hex.EncodeToString(sum[:])[:16]
+	// The client path is a Nix interpolation that must survive the string
+	// encoder, so it is carried as a plain-text placeholder and substituted
+	// after escaping (nixString would already have escaped any ${…}).
+	payload := "# nixcp-mariadb-accounts sha256=" + hash + "\n" +
+		"@MARIADB@/bin/mariadb --protocol=socket -u root --batch < " + nixcpMariaDBSecretPath(c.Owner.Home)
+	encoded := strings.ReplaceAll(nixString(payload), "@MARIADB@", "${pkgs.mariadb}")
+	b.WriteString("  systemd.services.nixcp-mariadb-accounts = {\n")
+	b.WriteString("    description = \"NixCP per-site MariaDB accounts\";\n")
+	b.WriteString("    after = [ \"mysql.service\" ];\n")
+	b.WriteString("    wantedBy = [ \"multi-user.target\" ];\n")
+	b.WriteString("    serviceConfig = { Type = \"oneshot\"; RemainAfterExit = true; };\n")
+	fmt.Fprintf(b, "    script = %s;\n", encoded)
+	b.WriteString("  };\n")
+}
+
 func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
+	if len(c.PHP.Installed) > 0 {
+		// Keep Composer system-owned and at a stable absolute path. The CLI
+		// runs this PHP script through the project-resolved PHP binary.
+		b.WriteString("  environment.etc.\"nixcp/composer/bin/composer\".source = \"${pkgs.phpPackages.composer}/bin/composer\";\n")
+	}
 	for _, v := range c.PHP.Installed {
 		entry, ok := php.Catalog[v]
 		if !ok {

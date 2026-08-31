@@ -29,7 +29,7 @@ func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
 		}
 	}
 
-	commands := []string{"install", "status", "doctor", "service", "php", "artisan", "link", "unlink", "sites", "shell", "version"}
+	commands := []string{"install", "status", "doctor", "service", "php", "artisan", "composer", "link", "unlink", "sites", "shell", "version"}
 	for _, c := range commands {
 		if cmd, _, err := root.Find([]string{c}); err != nil || cmd == nil {
 			t.Fatalf("missing command %q (err=%v)", c, err)

@@ -11,7 +11,7 @@ import (
 func newShellCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "shell", Short: "Shell helper setup"}
 	cmd.AddCommand(&cobra.Command{Use: "init [bash|zsh|fish]", Short: "Print shell function snippet", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
-		snippet, err := shellpkg.Snippet(a[0])
+		snippet, err := shellpkg.Startup(a[0])
 		if err != nil {
 			return err
 		}

@@ -100,7 +100,12 @@ func runService(cmd *cobra.Command, runtime Runtime, name service.Name, action s
 	if manager == nil {
 		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, desiredHealth{systemd: runtime.Services, name: name, running: cfg.DesiredState == "running"})
 	}
-	result, err := manager.Apply(cmd.Context(), transaction.Request{Files: map[string][]byte{"config.yaml": configBytes, "generated/nixcp-module.nix": module}, CandidateModule: "generated/nixcp-module.nix", Affected: []string{string(name)}})
+	secretFiles, _ := mariaDBSecretFiles(snap)
+	files := map[string][]byte{"config.yaml": configBytes, "generated/nixcp-module.nix": module}
+	for k, v := range secretFiles {
+		files[k] = v
+	}
+	result, err := manager.Apply(cmd.Context(), transaction.Request{Files: files, CandidateModule: "generated/nixcp-module.nix", Affected: []string{string(name)}})
 	if err != nil {
 		return transactionError(err)
 	}

@@ -388,7 +388,8 @@ func safeRelative(p string) bool {
 func validateDeletes(deletes []string) error {
 	seen := map[string]struct{}{}
 	for _, p := range deletes {
-		if !safeRelative(p) || p == "config.yaml" || p == "generated/nixcp-module.nix" || !strings.HasPrefix(p, "sites/") || filepath.Ext(p) != ".yaml" {
+		allowed := (strings.HasPrefix(p, "sites/") && filepath.Ext(p) == ".yaml") || (strings.HasPrefix(p, "secrets/") && filepath.Ext(p) == ".sql")
+		if !safeRelative(p) || p == "config.yaml" || p == "generated/nixcp-module.nix" || !allowed {
 			return fmt.Errorf("unsafe managed delete path %q", p)
 		}
 		if _, ok := seen[p]; ok {

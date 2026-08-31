@@ -10,7 +10,9 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/nix"
 	"github.com/nixcp/nixcp/internal/output"
+	shellpkg "github.com/nixcp/nixcp/internal/shell"
 	"github.com/nixcp/nixcp/internal/state"
 	"github.com/spf13/cobra"
 )
@@ -18,9 +20,6 @@ import (
 const (
 	laravelTemplate   = "# NixCP Laravel location template\ntry_files $uri $uri/ /index.php?$query_string;\n"
 	wordpressTemplate = "# NixCP WordPress location template\ntry_files $uri $uri/ /index.php?$args;\n"
-	bashIntegration   = "# Source manually: source ~/.nixcp/shell/bash.sh\n"
-	zshIntegration    = "# Source manually: source ~/.nixcp/shell/zsh.sh\n"
-	fishIntegration   = "# Source manually: source ~/.nixcp/shell/fish.fish\n"
 )
 
 func newInstallCommand(runtime Runtime) *cobra.Command {
@@ -76,6 +75,17 @@ func newInstallCommand(runtime Runtime) *cobra.Command {
 		if err := writeGenerated(modulePath, module); err != nil {
 			return apperrors.New("state_write_failed", err.Error(), "", apperrors.ExitCodeRuntime)
 		}
+		// Publish the private 0600 MariaDB grants file in lockstep with the
+		// module. It is never referenced by value inside the module, only by
+		// path, so no password reaches the world-readable Nix store.
+		secretPath := filepath.Join(store.Root, "secrets", "mariadb", "accounts.sql")
+		if sql := nix.MariaDBAccountsSQL(snap.Config, snap.Sites); sql != "" {
+			if err := writeGenerated(secretPath, []byte(sql)); err != nil {
+				return apperrors.New("state_write_failed", err.Error(), "", apperrors.ExitCodeRuntime)
+			}
+		} else {
+			_ = os.Remove(secretPath)
+		}
 
 		confirmed, _ := cmd.Flags().GetBool("confirm-import")
 		if confirmed {
@@ -116,9 +126,16 @@ func installStaticArtifacts(store *state.Store) error {
 	artifacts := map[string][]byte{
 		filepath.Join(store.Root, "nginx-templates", "laravel.conf"):   []byte(laravelTemplate),
 		filepath.Join(store.Root, "nginx-templates", "wordpress.conf"): []byte(wordpressTemplate),
-		filepath.Join(store.Root, "shell", "bash.sh"):                  []byte(bashIntegration),
-		filepath.Join(store.Root, "shell", "zsh.sh"):                   []byte(zshIntegration),
-		filepath.Join(store.Root, "shell", "fish.fish"):                []byte(fishIntegration),
+	}
+	// Every supported shell gets a real startup file: the ncp() wrapper plus
+	// the new-session default-capture bootstrap. writeGenerated runs under
+	// umask(0077), so the generated files stay private to the owner.
+	for _, shell := range []string{"bash", "zsh", "fish"} {
+		snippet, err := shellpkg.Startup(shell)
+		if err != nil {
+			return err
+		}
+		artifacts[filepath.Join(store.Root, "shell", shell+"."+shellFileExt(shell))] = []byte(snippet)
 	}
 	for path, contents := range artifacts {
 		if err := writeGenerated(path, contents); err != nil {
@@ -126,6 +143,13 @@ func installStaticArtifacts(store *state.Store) error {
 		}
 	}
 	return nil
+}
+
+func shellFileExt(shell string) string {
+	if shell == "fish" {
+		return "fish"
+	}
+	return "sh"
 }
 
 func installPayload(root, module string, rebuild state.RebuildConfig) map[string]any {

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -46,12 +47,26 @@ type Checker interface {
 	Check(context.Context, []string) error
 }
 
+// DBCredentials is the per-database account NixCP provisions for a site.
+// User is always the database name; Password is the generated owner-only secret.
+type DBCredentials struct {
+	Database string
+	User     string
+	Password string
+}
+
 // LocalChecker verifies a local socket connection and every affected named
 // database. Lookup is injected so tests do not depend on PATH; the production
 // default uses exec.LookPath. Commands use argv exclusively.
+//
+// When Credentials is non-empty, each database is verified as its own dedicated
+// user (the password is passed via MYSQL_PWD env, never argv, so it cannot leak
+// through ps); databases without a credential still fall back to the anonymous
+// current-OS-user socket check.
 type LocalChecker struct {
-	Runner execx.Runner
-	Lookup func(string) (string, error)
+	Runner      execx.Runner
+	Lookup      func(string) (string, error)
+	Credentials map[string]DBCredentials
 }
 
 func (c LocalChecker) Check(ctx context.Context, affected []string) error {
@@ -70,11 +85,15 @@ func (c LocalChecker) Check(ctx context.Context, affected []string) error {
 	if err != nil {
 		return &ToolUnavailableError{Err: err}
 	}
-	if err := c.query(ctx, client, ""); err != nil {
-		return classifyConnection(err)
+	if len(c.Credentials) == 0 {
+		// Anonymous socket probe only when no per-site account is involved.
+		if err := c.query(ctx, client, "", DBCredentials{}, false); err != nil {
+			return classifyConnection(err)
+		}
 	}
 	for _, name := range databases {
-		if err := c.query(ctx, client, name); err != nil {
+		cred, hasCred := c.Credentials[name]
+		if err := c.query(ctx, client, name, cred, hasCred); err != nil {
 			if isMissingDatabase(err.Error()) {
 				return &DatabaseMissingError{Database: name}
 			}
@@ -110,13 +129,22 @@ func localClient(lookup func(string) (string, error)) (string, error) {
 	return "", lookupErr
 }
 
-func (c LocalChecker) query(ctx context.Context, client, database string) error {
+func (c LocalChecker) query(ctx context.Context, client, database string, cred DBCredentials, hasCred bool) error {
 	args := []string{"--protocol=socket", "--batch", "--skip-column-names"}
-	if database != "" {
-		args = append(args, "--database", database)
+	cmd := &execx.Command{Name: client, Args: args, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit}
+	if hasCred {
+		if cred.User != "" {
+			cmd.Args = append(cmd.Args, "--user", cred.User)
+		}
+		if cred.Password != "" {
+			cmd.Env = append(os.Environ(), "MYSQL_PWD="+cred.Password)
+		}
 	}
-	args = append(args, "--execute", "SELECT 1")
-	result, err := c.Runner.Run(ctx, &execx.Command{Name: client, Args: args, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
+	if database != "" {
+		cmd.Args = append(cmd.Args, "--database", database)
+	}
+	cmd.Args = append(cmd.Args, "--execute", "SELECT 1")
+	result, err := c.Runner.Run(ctx, cmd)
 	if err == nil && result.ExitCode == 0 {
 		return nil
 	}

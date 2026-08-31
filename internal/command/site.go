@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/nixcp/nixcp/internal/database"
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/nginxsnippet"
 	"github.com/nixcp/nixcp/internal/output"
@@ -139,7 +140,7 @@ func runLink(cmd *cobra.Command, runtime Runtime, rawDomain string) error {
 		if !snap.Config.Services.MariaDB.Installed || snap.Config.Services.MariaDB.DesiredState != "running" {
 			return apperrors.New("mariadb_not_running", "MariaDB must be installed and running", "Run: ncp service mariadb install", apperrors.ExitCodePrecond)
 		}
-		maria = &state.MariaDBConfig{Database: db}
+		maria = &state.MariaDBConfig{Database: db, User: db, Password: state.GenerateDatabasePassword()}
 		if !containsString(snap.Config.MariaDBRegistry.Databases, db) {
 			snap.Config.MariaDBRegistry.Databases = append(snap.Config.MariaDBRegistry.Databases, db)
 		}
@@ -213,12 +214,23 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 		}
 		files[filepath.Join("sites", s.ID+".yaml")] = b
 	}
+	// Keep the 0600 MariaDB grants file (which holds the per-site passwords) in
+	// sync: written when a site declares a database, removed when none do.
+	{
+		secretFiles, secretDeletes := mariaDBSecretFiles(snap)
+		for k, v := range secretFiles {
+			files[k] = v
+		}
+		deletes = append(deletes, secretDeletes...)
+	}
 	manager := runtime.Transactions
 	if manager == nil {
+		dbCheck := runtime.DatabaseCheck
+		dbCheck = credentialedDatabaseCheck(dbCheck, snap.Sites)
 		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, transaction.CompositeHealth{
 			desiredHealth{systemd: runtime.Services, name: "nginx", running: true},
 			siteTransactionHealth(runtime, snap),
-			runtime.DatabaseCheck,
+			dbCheck,
 		})
 	}
 	affected := []string{"nginx", "nginx-config"}
@@ -234,13 +246,44 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	}
 	data := map[string]any{"id": site.ID, "domain": site.Domain, "php": site.PHP, "documentRoot": site.DocumentRoot, "handler": site.Nginx.Handler.Type, "phase": result.Phase}
 	if site.MariaDB != nil {
-		data["mariadb"] = site.MariaDB.Database
+		data["mariadb"] = map[string]any{"database": site.MariaDB.Database, "user": site.MariaDB.User, "password": site.MariaDB.Password}
 	}
 	if commandJSON(cmd) {
 		return emitJSON(cmd, output.Success(action, result.Changed, data, nil))
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
+	if site.MariaDB != nil {
+		fmt.Fprintf(cmd.OutOrStdout(), "  database: %s (user: %s, password: %s)\n", site.MariaDB.Database, site.MariaDB.User, site.MariaDB.Password)
+	}
 	return nil
+}
+
+// credentialedDatabaseCheck decorates the runtime MariaDB checker with the
+// site-specific credentials (when known) so the post-switch health phase
+// verifies each declared database as its own dedicated account, proving the
+// generated user and password actually work on the switched system. Injected
+// test fakes and custom checkers are left untouched.
+func credentialedDatabaseCheck(check database.Checker, sites []state.SiteConfig) database.Checker {
+	creds := map[string]database.DBCredentials{}
+	for _, s := range sites {
+		if s.MariaDB == nil {
+			continue
+		}
+		creds[s.MariaDB.Database] = database.DBCredentials{Database: s.MariaDB.Database, User: s.MariaDB.User, Password: s.MariaDB.Password}
+	}
+	if len(creds) == 0 {
+		return check
+	}
+	if local, ok := check.(database.LocalChecker); ok {
+		local.Credentials = creds
+		return local
+	}
+	if localPtr, ok := check.(*database.LocalChecker); ok {
+		local := *localPtr
+		local.Credentials = creds
+		return &local
+	}
+	return check
 }
 
 func siteTransactionHealth(runtime Runtime, snap state.Snapshot) sitepkg.TransactionHealth {
@@ -319,7 +362,15 @@ func runSitesList(cmd *cobra.Command, runtime Runtime) error {
 		return emitJSON(cmd, output.Success("sites.list", false, map[string]any{"sites": snap.Sites}, nil))
 	}
 	for _, s := range snap.Sites {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s %s php=%s root=%s\n", s.ID, s.Domain, s.PHP, s.DocumentRoot)
+		handler := s.Nginx.Handler.Type
+		if handler == "template" && s.Nginx.Handler.Name != "" {
+			handler = "template:" + s.Nginx.Handler.Name
+		}
+		line := fmt.Sprintf("%s %s enabled=%t php=%s root=%s handler=%s", s.ID, s.Domain, s.Enabled, s.PHP, s.DocumentRoot, handler)
+		if s.MariaDB != nil {
+			line += " db=" + s.MariaDB.Database
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), line)
 	}
 	return nil
 }
@@ -344,6 +395,9 @@ func runSitesShow(cmd *cobra.Command, runtime Runtime, key string) error {
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", s.ID, s.Domain)
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", health.Describe())
+			if s.MariaDB != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  database: %s (user: %s, password: %s)\n", s.MariaDB.Database, s.MariaDB.User, s.MariaDB.Password)
+			}
 			return nil
 		}
 	}

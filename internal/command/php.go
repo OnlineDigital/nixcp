@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
@@ -37,7 +38,52 @@ func newPHPCommand(runtime Runtime) *cobra.Command {
 	use.Flags().Bool("global", false, "Set global default for new shells")
 	use.Flags().String("shell-emit", "", "internal shell activation protocol")
 	_ = use.Flags().MarkHidden("shell-emit")
+	cmd.AddCommand(sessionCommand(runtime))
 	return cmd
+}
+
+// sessionCommand is the hidden bootstrap used by the shell startup file: it
+// prints the activation code for the configured default PHP version (the
+// active NIXCP_PHP_VERSION when installed, else the global default), or emits
+// nothing when there is no usable default. It is data-safe: output is always
+// evaluable shell code or empty, never an error message.
+func sessionCommand(runtime Runtime) *cobra.Command {
+	session := &cobra.Command{Use: "session", Short: "Print default PHP activation for new shells", Args: cobra.ExactArgs(0), RunE: func(c *cobra.Command, _ []string) error {
+		shell, _ := c.Flags().GetString("shell-emit")
+		return sessionPHP(c, runtime, shell)
+	}}
+	session.Flags().String("shell-emit", "", "internal shell activation protocol")
+	_ = session.Flags().MarkHidden("shell-emit")
+	return session
+}
+
+func sessionPHP(cmd *cobra.Command, runtime Runtime, shell string) error {
+	_, snap, err := loadPHP(runtime)
+	if err != nil {
+		// Not initialized or unreadable: emit nothing, exit 0. The shell
+		// bootstrap treats empty output as "no default configured".
+		fmt.Fprint(cmd.OutOrStdout(), "")
+		return nil
+	}
+	v := os.Getenv("NIXCP_PHP_VERSION")
+	if v == "" || !containsString(snap.Config.PHP.Installed, v) {
+		v = snap.Config.PHP.GlobalDefault
+	}
+	if v == "" || !containsString(snap.Config.PHP.Installed, v) {
+		fmt.Fprint(cmd.OutOrStdout(), "")
+		return nil
+	}
+	key := shell
+	if key == "" {
+		key = "bash"
+	}
+	code, err := shellpkg.Activation(key, v)
+	if err != nil {
+		fmt.Fprint(cmd.OutOrStdout(), "")
+		return nil
+	}
+	fmt.Fprint(cmd.OutOrStdout(), code)
+	return nil
 }
 func dispatchPHP(cmd *cobra.Command, runtime Runtime, args []string) error {
 	if len(args) == 2 && args[0] == "install" {
@@ -109,6 +155,9 @@ func mutatePHP(cmd *cobra.Command, runtime Runtime, action, raw string) error {
 		}
 	case "extension":
 		if !containsString(snap.Config.PHP.Extensions, value) {
+			if err := ensureExtensionAvailable(snap.Config.PHP.Installed, value); err != nil {
+				return err
+			}
 			snap.Config.PHP.Extensions = append(snap.Config.PHP.Extensions, value)
 			changed = true
 		}
@@ -138,7 +187,12 @@ func mutatePHP(cmd *cobra.Command, runtime Runtime, action, raw string) error {
 	if manager == nil {
 		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, phpHealth{})
 	}
-	result, err := manager.Apply(cmd.Context(), transaction.Request{Files: map[string][]byte{"config.yaml": config, "generated/nixcp-module.nix": module}, CandidateModule: "generated/nixcp-module.nix", Affected: []string{"php"}})
+	secretFiles, _ := mariaDBSecretFiles(snap)
+	files := map[string][]byte{"config.yaml": config, "generated/nixcp-module.nix": module}
+	for k, v := range secretFiles {
+		files[k] = v
+	}
+	result, err := manager.Apply(cmd.Context(), transaction.Request{Files: files, CandidateModule: "generated/nixcp-module.nix", Affected: []string{"php"}})
 	if err != nil {
 		return transactionError(err)
 	}
@@ -298,6 +352,33 @@ func containsString(a []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// ensureExtensionAvailable enforces plan 07: an installed extension must be
+// available in at least one installed PHP version. If none of the installed
+// versions provides it (including when no PHP is installed yet), the command
+// fails instead of silently recording an extension that would be unusable.
+func ensureExtensionAvailable(installed []string, ext string) error {
+	if len(installed) == 0 {
+		return apperrors.New("php_extension_unavailable", "no PHP version is installed", "Run: ncp php install <version>", apperrors.ExitCodePrecond)
+	}
+	for _, v := range installed {
+		if _, ok := php.Compatible(v, ext); ok {
+			return nil
+		}
+	}
+	var available []string
+	for _, v := range php.Catalog {
+		if _, ok := v.Extensions[ext]; ok {
+			available = append(available, v.Version)
+		}
+	}
+	sort.Strings(available)
+	hint := ""
+	if len(available) > 0 {
+		hint = "Install a PHP version that provides it: ncp php install " + strings.Join(available, ", ") + " (installed: " + strings.Join(installed, ", ") + ")"
+	}
+	return apperrors.New("php_extension_unavailable", "PHP extension "+ext+" is not available for any installed PHP version", hint, apperrors.ExitCodePrecond)
 }
 
 type phpHealth struct{}

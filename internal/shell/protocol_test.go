@@ -33,3 +33,59 @@ func TestActivationQuotesVersionAndSelectsMatchingBin(t *testing.T) {
 		}
 	}
 }
+
+func TestZshActivationSplitsPathExplicitly(t *testing.T) {
+	zsh, err := Activation("zsh", "8.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(zsh, "${(s.:.)PATH}") {
+		t.Fatalf("zsh activation must split PATH explicitly via ${(s.:.)PATH}, got: %s", zsh)
+	}
+	if strings.Contains(zsh, "for _nixcp_p in $PATH") {
+		t.Fatalf("zsh activation must not rely on unquoted $PATH word-splitting, got: %s", zsh)
+	}
+	bash, err := Activation("bash", "8.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(bash, "${(s.:.)PATH}") {
+		t.Fatalf("bash activation must keep the IFS loop idiom, got: %s", bash)
+	}
+}
+
+func TestBootstrapEmitsDefaultCapture(t *testing.T) {
+	for _, name := range []string{"bash", "zsh", "fish"} {
+		b, err := Bootstrap(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b, "ncp php session --shell-emit="+name) {
+			t.Fatalf("%s bootstrap must invoke the session subcommand, got: %s", name, b)
+		}
+		if !strings.Contains(b, "NIXCP_PHP_VERSION") {
+			t.Fatalf("%s bootstrap must guard on NIXCP_PHP_VERSION, got: %s", name, b)
+		}
+	}
+}
+
+func TestStartupCombinesWrapperAndBootstrap(t *testing.T) {
+	snippet, err := Snippet("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := Bootstrap("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	startup, err := Startup("bash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startup != snippet+bootstrap {
+		t.Fatalf("Startup must be Snippet + Bootstrap verbatim")
+	}
+	if !strings.Contains(startup, "ncp()") || !strings.Contains(startup, "php session") {
+		t.Fatalf("Startup must include both the wrapper and the default capture, got: %s", startup)
+	}
+}

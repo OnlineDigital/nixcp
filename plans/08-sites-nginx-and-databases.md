@@ -105,13 +105,26 @@ PHP merge prin socket-ul site-ului. Se blochează `.ht*`, `wp-config.php` direct
 `--mariadb=example_app` înseamnă:
 
 - asigură existența DB-ului validat;
-- asigură account local Unix-socket pentru owner și grants limitate la DB-urile declarate;
-- nu generează/stochează parolă dacă socket auth este disponibil;
+- asigură un **account dedicat per-site**: user = numele DB-ului, cu o parolă
+generată aleator (alfanumeric, `crypto/rand`), stocată numai în YAML-ul privat
+al site-ului (0600);
+- grants limitate la DB-ul declarat (CREATE USER + GRANT, idempotent, fără
+  DROP);
+- **nu pune parola în Nix-ul world-readable**: modulul generat referențiază un
+  fișier privat `~/.nixcp/secrets/mariadb/accounts.sql` (0600) pe care unitatea
+  oneshot `nixcp-mariadb-accounts` îl execută prin stdin; modulul poartă doar
+  path-ul și un digest SHA-256 al SQL-ului (ca rotirea parolei să retrigereze
+  `ALTER USER` la next switch);
 - nu editează `.env`;
 - nu presupune primary/shared și nu creează ownership între site-uri;
-- aceeași DB menționată de mai multe manifesturi este deduplicată declarativ.
+- aceeași DB menționată de mai multe manifesturi este respinsă
+  (`database_in_use`) întrucât user = DB și un singur user per DB;
 
-Dacă un site elimină referința ori este unlink-uit, DB și account/grants nu sunt șterse automat în v1. Renderer-ul poate păstra un registry conservator al bazelor create în config dacă este necesar pentru non-destrucție; decizia exactă trebuie să garanteze că regenerarea nu emite un DROP. Comenzile destructive DB sunt în afara scopului.
+Dacă un site elimină referința ori este unlink-uit, DB și account/grants nu sunt
+șterse automat în v1. Renderer-ul poate păstra un registry conservator al bazelor
+create în config dacă este necesar pentru non-destrucție; decizia exactă trebuie
+să garanteze că regenerarea nu emite un DROP. Comenzile destructive DB sunt în
+afara scopului.
 
 ## `unlink`
 

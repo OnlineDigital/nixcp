@@ -130,7 +130,7 @@ Implementarea finală trebuie să trateze forma exactă acceptată și să nu in
 
 ## Default global și sesiuni paralele
 
-`ncp php use --global 8.4` modifică numai `config.yaml`. Shell init, la pornirea unei sesiuni noi, citește default-ul printr-un output data-safe al binarului și îl capturează în `NIXCP_PHP_VERSION/BIN`.
+`ncp php use --global 8.4` modifică numai `config.yaml`. Shell init, la pornirea unei sesiuni noi, citește default-ul printr-un output data-safe al binarului și îl capturează în `NIXCP_PHP_VERSION/BIN`. Acest lucru este furnizat de subcomanda internă ascunsă `ncp php session --shell-emit=<shell>`, care emite codul de activare pentru versiunea activă (dacă e instalată) sau pentru `globalDefault` (dacă e instalat), altfel nimic și exit 0.
 
 Un terminal existent nu este rescris când default-ul se schimbă. Exemplu:
 
@@ -157,6 +157,7 @@ Pentru direct `php`, PATH-ul sesiunii este decisiv. Hook-ul poate opțional sinc
 - semnalele sunt propagate;
 - exit code PHP este returnat;
 - `artisan` este exact `selected-php ./artisan args...`, după lstat/readability check;
+- `composer` folosește același resolver PHP peste scriptul stabil `/etc/nixcp/composer/bin/composer` (sistem-own, instalat de modulul generat); argumentele sunt transmise verbatim, exit code-ul Composer este propagat, și este necesar când proiectul are dependențe Composer (install/require/...);
 - funcționează și fără wrapper shell.
 
 ## Teste shell reale

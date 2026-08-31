@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/nixcp/nixcp/internal/nginxsnippet"
+	"github.com/go-playground/validator/v10"
 )
 
 // supportedSchemaVersion is the only state schema accepted by this binary.
@@ -20,12 +21,12 @@ var siteIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 
 // ConfigSnapshot is config.yaml. Empty strings encode YAML null for nullable fields.
 type ConfigSnapshot struct {
-	SchemaVersion   int             `yaml:"schemaVersion"`
-	Owner           Owner           `yaml:"owner"`
-	Platform        Platform        `yaml:"platform"`
-	Rebuild         RebuildConfig   `yaml:"rebuild"`
-	Services        ServiceStates   `yaml:"services"`
-	PHP             PHPConfig       `yaml:"php"`
+	SchemaVersion   int             `yaml:"schemaVersion" validate:"required,eq=2"`
+	Owner           Owner           `yaml:"owner" validate:"required"`
+	Platform        Platform        `yaml:"platform" validate:"required"`
+	Rebuild         RebuildConfig   `yaml:"rebuild" validate:"required"`
+	Services        ServiceStates   `yaml:"services" validate:"required"`
+	PHP             PHPConfig       `yaml:"php" validate:"required"`
 	MariaDBRegistry MariaDBRegistry `yaml:"mariadbRegistry,omitempty"`
 }
 
@@ -340,7 +341,8 @@ func NormalizeAndValidateConfig(raw []byte) (ConfigSnapshot, error) {
 	// Declarative structural layer (go-playground/validator) runs after
 	// canonicalization and before semantic rules: it guards the structural
 	// contract of the current schema on every parsed config.yaml.
-	if err := applyStructural("config", structuralConfig(cfg)); err != nil {
+	validate := validator.New()
+	if err := validate.Struct(cfg); err != nil {
 		return cfg, err
 	}
 	return cfg, ValidateConfig(cfg)

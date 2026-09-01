@@ -29,7 +29,7 @@ func TestAdapterStatusUsesOnlyFixedArgv(t *testing.T) {
 	if !actual.Active || !actual.Enabled || actual.Health != "healthy" {
 		t.Fatalf("unexpected actual: %#v", actual)
 	}
-	want := [][]string{{"systemctl", "is-active", "--quiet", "nginx.service"}, {"systemctl", "is-enabled", "--quiet", "nginx.service"}, {"sudo", "--", "nginx", "-t"}, {"ss", "-ltnH"}}
+	want := [][]string{{"systemctl", "is-active", "--quiet", "nginx.service"}, {"systemctl", "is-enabled", "--quiet", "nginx.service"}, {"sudo", "--", "/run/current-system/sw/bin/nginx", "-t"}, {"ss", "-ltnH"}}
 	var got [][]string
 	for _, c := range f.Runs {
 		got = append(got, append([]string{c.Name}, c.Args...))

@@ -87,7 +87,7 @@ func TestNginxConfigVerifierUsesFixedArgv(t *testing.T) {
 	if err := (NginxConfigVerifier{Runner: runner}).Verify(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.Runs) != 1 || runner.Runs[0].Name != "sudo" || strings.Join(runner.Runs[0].Args, "\x00") != "--\x00nginx\x00-t" {
+	if len(runner.Runs) != 1 || runner.Runs[0].Name != "sudo" || strings.Join(runner.Runs[0].Args, "\x00") != "--\x00/run/current-system/sw/bin/nginx\x00-t" {
 		t.Fatalf("unexpected command %#v", runner.Runs)
 	}
 }

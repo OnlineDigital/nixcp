@@ -50,7 +50,7 @@ func (v NginxConfigVerifier) Verify(ctx context.Context) error {
 	if v.Runner == nil {
 		return fmt.Errorf("nginx configuration verifier is not configured")
 	}
-	result, err := v.Runner.Run(ctx, &execx.Command{Name: "sudo", Args: []string{"--", "nginx", "-t"}, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
+	result, err := v.Runner.Run(ctx, &execx.Command{Name: "sudo", Args: []string{"--", "/run/current-system/sw/bin/nginx", "-t"}, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
 	if err != nil || result.ExitCode != 0 {
 		detail := strings.TrimSpace(result.Stderr)
 		if detail == "" {

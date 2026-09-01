@@ -172,7 +172,11 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner string) {
 	socket := "/run/nixcp/php-fpm/" + s.ID + ".sock"
 	// Each site gets an isolated pool and a private Unix socket; Nginx is the
 	// only peer allowed to reach it. The vhost boundary remains HTTP-only.
-	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = pkgs.%s; settings = { listen = %s; \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; }; };\n", nixString(pool), nixString(owner), nixString(owner), entry.Nixpkgs, nixString(socket))
+	// Dynamic keeps two workers warm for a responsive development site without
+	// allowing the pool to grow unbounded. `ondemand` cannot meet that minimum:
+	// it always begins with zero workers. Recycling at 200 requests bounds
+	// long-lived worker memory in development.
+	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = pkgs.%s; settings = { listen = %s; \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(owner), entry.Nixpkgs, nixString(socket))
 	fmt.Fprintf(b, "  services.nginx.virtualHosts.%s = {\n", nixString(s.Domain))
 	b.WriteString("    listen = [{ addr = \"0.0.0.0\"; port = 80; }];\n")
 	fmt.Fprintf(b, "    root = %s;\n", nixString(s.DocumentRoot))

@@ -55,6 +55,25 @@ func TestRenderPHP85SkipsUnavailableOpcacheAttribute(t *testing.T) {
 	}
 }
 
+func TestRenderComposerExposesPHPEntrypoint(t *testing.T) {
+	c := state.ConfigSnapshot{
+		SchemaVersion: 2,
+		Owner:         state.Owner{Username: "u", Group: "g", Home: "/tmp/u"},
+		Platform:      state.Platform{System: "x86_64-linux"},
+		Rebuild:       state.RebuildConfig{Mode: "traditional"},
+		Services:      state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}},
+		PHP:           state.PHPConfig{Installed: []string{"8.4"}},
+	}
+	b, err := (Renderer{}).Render(state.Snapshot{Config: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, "/share/php/composer/bin/composer") || strings.Contains(text, "/libexec/composer/composer.phar") {
+		t.Fatalf("Composer must expose its PHP entrypoint:\n%s", text)
+	}
+}
+
 func TestMariaDBAccountsSQL(t *testing.T) {
 	const pw = "nixcp-fixture-password-123456789"
 	sites := []state.SiteConfig{

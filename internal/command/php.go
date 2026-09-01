@@ -1,6 +1,7 @@
 package command
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -209,9 +210,6 @@ func mutatePHP(cmd *cobra.Command, runtime Runtime, action, raw string) error {
 		changed = snap.Config.PHP.GlobalDefault != value
 		snap.Config.PHP.GlobalDefault = value
 	}
-	if !changed {
-		return emitPHPResult(cmd, action, value, false, nil, "committed")
-	}
 	snap.Config.Canonicalize()
 	if err := snap.Validate(); err != nil {
 		return apperrors.New("invalid_state", err.Error(), "", apperrors.ExitCodePrecond)
@@ -219,6 +217,15 @@ func mutatePHP(cmd *cobra.Command, runtime Runtime, action, raw string) error {
 	module, err := runtime.Renderer.Render(snap)
 	if err != nil {
 		return apperrors.New("render_failed", err.Error(), "", apperrors.ExitCodeBuild)
+	}
+	if !changed {
+		// Re-run a no-op PHP command when the generated module is stale. This
+		// safely rolls out renderer fixes (such as a corrected Composer entry
+		// path) without making every idempotent command rebuild the system.
+		current, readErr := os.ReadFile(filepath.Join(store.Root, "generated", "nixcp-module.nix"))
+		if readErr == nil && bytes.Equal(current, module) {
+			return emitPHPResult(cmd, action, value, false, nil, "committed")
+		}
 	}
 	config, err := state.MarshalConfig(snap.Config)
 	if err != nil {

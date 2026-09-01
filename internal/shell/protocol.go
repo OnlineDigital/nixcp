@@ -20,7 +20,11 @@ func Activation(name, version string) (string, error) {
 	}
 	bin := "/etc/nixcp/php/" + version + "/bin"
 	if name == "fish" {
-		return "set -l old $NIXCP_PHP_BIN\nset -gx PATH " + quote(bin) + " (string match -v -- $old $PATH)\nset -gx NIXCP_PHP_VERSION " + quote(version) + "\nset -gx NIXCP_PHP_BIN " + quote(bin) + "\n", nil
+		// When NIXCP_PHP_BIN is unset, passing the empty $old expansion to
+		// string match makes Fish treat the first PATH entry as its pattern,
+		// leaving no input and dropping the entire existing PATH. Only filter
+		// when there is an old NixCP path to remove.
+		return "set -l old $NIXCP_PHP_BIN\nset -l clean_path $PATH\nif test -n \"$old\"\n  set clean_path (string match -v -- \"$old\" $PATH)\nend\nset -gx PATH " + quote(bin) + " $clean_path\nset -gx NIXCP_PHP_VERSION " + quote(version) + "\nset -gx NIXCP_PHP_BIN " + quote(bin) + "\n", nil
 	}
 
 	// Strip any previous NixCP bin from PATH before prepending the new one.

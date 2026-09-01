@@ -218,3 +218,26 @@ ncp status
 		t.Fatalf("fish non-use invocation did not delegate to command ncp:\n%s", got)
 	}
 }
+
+func TestShellActivationPreservesPATHOnFirstFishSelection(t *testing.T) {
+	skipWithoutShell(t, "fish")
+	code, err := shellpkg.Activation("fish", "8.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	fake := filepath.Join(bin, "ncp")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho ok\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := code + "\ncommand ncp\nprintf '%s\\n' $PATH\n"
+	cmd := exec.Command("fish", "-c", script)
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("first Fish activation lost PATH: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ok") || !strings.Contains(string(out), bin) {
+		t.Fatalf("first Fish activation did not preserve the original PATH:\n%s", out)
+	}
+}

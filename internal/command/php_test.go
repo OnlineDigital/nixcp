@@ -528,3 +528,37 @@ func TestPHPUninstallRefusesVersionUsedBySite(t *testing.T) {
 		t.Fatalf("expected in-use refusal, got %v", err)
 	}
 }
+
+func TestPHPInstallReconcilesStaleGeneratedModule(t *testing.T) {
+	home := t.TempDir()
+	u, _ := user.Current()
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.4"}, GlobalDefault: "8.4"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.Root, "generated", "nixcp-module.nix"), []byte("stale"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rt := defaultRuntime()
+	rt.Runner = &execx.FakeRunner{}
+	rt.StateHome = home
+	rt.Transactions = testTransaction(home)
+	root, err := NewRootCommand(context.Background(), func(r *Runtime) { *r = rt })
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.SetArgs([]string{"php", "install", "8.4"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("reconciliation failed: %v", err)
+	}
+	module, err := os.ReadFile(filepath.Join(store.Root, "generated", "nixcp-module.nix"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(module), "/share/php/composer/bin/composer") {
+		t.Fatalf("stale module was not reconciled:\n%s", module)
+	}
+}

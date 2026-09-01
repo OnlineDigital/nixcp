@@ -5,6 +5,7 @@
   environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
   services.nginx.enable = true;
   services.mysql.enable = true;
+  services.mysql.package = pkgs.mariadb;
   services.mysql.settings.mysqld.bind-address = "127.0.0.1";
   services.mysql.ensureDatabases = [ "app" ];
   systemd.services.nixcp-mariadb-accounts = {

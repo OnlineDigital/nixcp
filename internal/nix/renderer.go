@@ -50,6 +50,10 @@ func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 	})
 	renderServicePolicy(b, "mysql", c.Services.MariaDB, func() {
 		b.WriteString("  services.mysql.enable = true;\n")
+		// NixOS 26.05 requires an explicit services.mysql.package. Pin the
+		// supported local database implementation instead of relying on a
+		// release-dependent module default.
+		b.WriteString("  services.mysql.package = pkgs.mariadb;\n")
 		b.WriteString("  services.mysql.settings.mysqld.bind-address = \"127.0.0.1\";\n")
 	})
 	renderServicePolicy(b, "valkey-nixcp", c.Services.Valkey, func() {

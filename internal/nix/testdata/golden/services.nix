@@ -6,6 +6,7 @@
   services.nginx.enable = true;
   systemd.services."nginx".wantedBy = lib.mkForce [];
   services.mysql.enable = true;
+  services.mysql.package = pkgs.mariadb;
   services.mysql.settings.mysqld.bind-address = "127.0.0.1";
   services.redis.package = pkgs.valkey;
   services.redis.servers.nixcp = { enable = true; bind = "127.0.0.1"; port = 6379; };

@@ -12,28 +12,96 @@ per-site PHP-FPM pools.
 
 ## Install and first use
 
-Build a development binary:
+NixCP runs on `x86_64-linux` NixOS with systemd, as the normal user that will
+own the sites. Do not run `ncp` with `sudo`.
+
+### Install `ncp` globally for your user
+
+Build from this checkout, then install the binary in `~/.local/bin`. This makes
+`ncp` available from every shell for the current user, without a system-wide
+installation or root access:
 
 ```sh
 make build
-./build/ncp version --json
+mkdir -p ~/.local/bin
+install -m 0755 build/ncp ~/.local/bin/ncp
 ```
 
-On the target NixOS machine, place the release `ncp` binary on your `PATH` and
-run:
+In Fish, persist that directory in `PATH` and verify the installation:
+
+```fish
+fish_add_path -U ~/.local/bin
+ncp version --json
+```
+
+`fish_add_path -U` stores the path as a Fish universal variable, so new Fish
+sessions can find `ncp`. If `~/.local/bin` is already on your `PATH`, this step
+is harmless. A release binary can be installed in the same way in place of
+`build/ncp`.
+
+### Bootstrap NixCP
+
+Initialize the private state directory, copy the exact import line printed by
+the command into your NixOS configuration or flake, then confirm that import:
 
 ```sh
 ncp install
-# Manually add the exact import printed by NixCP to configuration.nix or flake.
+# Add the exact `imports = [ "…" ];` line printed above to configuration.nix or the NixOS flake module.
 ncp install --confirm-import
-ncp service nginx install
-ncp php install 8.4
-ncp shell init bash   # print only; source it manually from your shell startup file
 ```
 
-See [installation and module integration](docs/installation-and-module.md) for
-traditional and flake handoff details. NixCP never edits `/etc/nixos`, your
-flake checkout, or shell startup files.
+`--confirm-import` evaluates the configuration with `nixos-rebuild build`; it
+does not switch the system. See [installation and module integration](docs/installation-and-module.md)
+for traditional and flake handoff details. NixCP never edits `/etc/nixos`, your
+flake checkout, or shell startup files itself.
+
+### Enable the Fish PHP integration
+
+NixCP needs a Fish function so `ncp php use <version>` can update the *current*
+shell's `PATH`. Generate it once and source it now:
+
+```fish
+mkdir -p ~/.config/fish/conf.d
+ncp shell init fish > ~/.config/fish/conf.d/nixcp.fish
+source ~/.config/fish/conf.d/nixcp.fish
+```
+
+The file is loaded automatically by future Fish sessions. After installing a
+PHP version, make it the default for new shells with
+`ncp php use --global 8.4`; use `ncp php use 8.3` inside a shell to switch that
+shell and write the project's `.php-version` marker.
+
+### Example: a new Laravel site
+
+The following creates a Laravel project, installs the required runtime, and
+links it to Nginx. Choose a real DNS name that resolves to this machine (or add
+an equivalent local hosts entry yourself); NixCP does not manage DNS or
+`/etc/hosts`.
+
+```sh
+# Install and select the PHP runtime, then enable Nginx.
+ncp php install 8.4
+ncp php use --global 8.4
+ncp service nginx install
+
+# Create a project with Composer running under NixCP's selected PHP.
+mkdir -p ~/projects
+cd ~/projects
+ncp composer create-project laravel/laravel example.test
+cd example.test
+
+# Create the HTTP site. The Laravel template uses `public/` as its document root.
+ncp link example.test --template laravel --php 8.4
+
+# Common Laravel commands run with the PHP version resolved by NixCP.
+ncp artisan key:generate
+ncp artisan migrate
+```
+
+To create a dedicated local MariaDB database at link time, first run
+`ncp service mariadb install`, then add `--mariadb example` to the `ncp link`
+command. NixCP prints the generated database credentials; put those values in
+the Laravel `.env` file before running migrations.
 
 ## Supported surface
 

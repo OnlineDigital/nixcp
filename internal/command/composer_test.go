@@ -81,7 +81,7 @@ func TestComposerForwardsOutputAndChildExitCode(t *testing.T) {
 	if code := app.Execute(); code != 17 {
 		t.Fatalf("expected child exit 17, got %d", code)
 	}
-	if stdout.String() != "partial output\n" || stderr.String() != "composer failed\n" {
+	if stdout.String() != "partial output\n" || !strings.Contains(stderr.String(), "composer failed\n") || !strings.Contains(stderr.String(), "composer_execution_failed") {
 		t.Fatalf("unexpected output forwarding: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

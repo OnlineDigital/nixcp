@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -308,6 +309,11 @@ func (a *ApplicationRoot) Execute() int {
 			payload := output.Error(commandName, appErr.Code, appErr.Message, appErr.Hint, appErr.CauseAsWarnings())
 			_ = output.WriteJSON(a.Root.OutOrStdout(), payload)
 		}
+	} else {
+		// Cobra errors are intentionally silenced so NixCP can keep a stable
+		// JSON envelope. The human-facing path must still surface the typed
+		// error, otherwise users receive only an opaque exit code.
+		fmt.Fprintln(a.Root.ErrOrStderr(), appErr)
 	}
 
 	return int(appErr.ExitCode())

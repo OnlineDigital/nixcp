@@ -126,3 +126,23 @@ func TestNonProcessJSONErrorEnvelopeStaysDiagnosticFree(t *testing.T) {
 		t.Fatalf("error envelope drifted from the stable shape.\ngot:  %q\nwant: %q", buf.String(), wantBuf.String())
 	}
 }
+
+func TestHumanErrorIsWrittenToStderr(t *testing.T) {
+	// The regular CLI must be diagnosable too: without --json, errors belong
+	// on stderr and must not disappear behind their process exit code.
+	app, _, _ := phpTestAppNoInit(t)
+	var stdout, stderr bytes.Buffer
+	app.Root.SetOut(&stdout)
+	app.Root.SetErr(&stderr)
+	app.Root.SetArgs([]string{"service", "nginx", "install"})
+
+	if code := app.Execute(); code != int(apperrors.ExitCodePrecond) {
+		t.Fatalf("expected precondition exit code, got %d", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("human error must not write to stdout: %q", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "not_configured") || !strings.Contains(got, "Run: ncp install") {
+		t.Fatalf("missing actionable human error on stderr: %q", got)
+	}
+}

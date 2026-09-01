@@ -333,6 +333,24 @@ func (m *Manager) Recover(ctx context.Context) error {
 		if j.Phase == PhaseCommitted || j.Phase == PhaseRolledBack {
 			continue
 		}
+		// OldGeneration is recorded immediately before publication. A crash
+		// before that point cannot have changed managed files or switched the
+		// host, so attempting a generation rollback is both unnecessary and
+		// unsafe (the empty value is rightly rejected by the NixOS adapter).
+		// This also repairs journals left as rollback-failed by older builds.
+		if j.OldGeneration == "" {
+			switch j.Phase {
+			case PhaseCreated, PhaseStaged, PhaseBuilt, PhaseRollingBack, PhaseRollbackFailed:
+				j.Phase = PhaseRolledBack
+				j.RollbackError = ""
+				if err := m.writeJournal(dir, &j); err != nil {
+					return fmt.Errorf("recovery %s: %w", j.ID, err)
+				}
+				continue
+			default:
+				return fmt.Errorf("recovery %s: missing prior system generation at phase %s", j.ID, j.Phase)
+			}
+		}
 		old, err := m.readFiles(filepath.Join(dir, "backup"))
 		if err != nil {
 			return fmt.Errorf("recovery %s: %w", j.ID, err)

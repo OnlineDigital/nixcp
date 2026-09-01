@@ -135,7 +135,7 @@ func TestStalePublishedJournalRecovers(t *testing.T) {
 	if e := m.writeFiles(filepath.Join(dir, "backup"), map[string][]byte{"config.yaml": []byte("old")}); e != nil {
 		t.Fatal(e)
 	}
-	if e := m.writeJournal(dir, &Journal{ID: "stale", Phase: PhasePublished, CandidateHashes: hashes(map[string][]byte{"config.yaml": []byte("new")})}); e != nil {
+	if e := m.writeJournal(dir, &Journal{ID: "stale", Phase: PhasePublished, OldGeneration: "/nix/store/generation-old", CandidateHashes: hashes(map[string][]byte{"config.yaml": []byte("new")})}); e != nil {
 		t.Fatal(e)
 	}
 	if e := m.Recover(context.Background()); e == nil {
@@ -147,6 +147,31 @@ func TestStalePublishedJournalRecovers(t *testing.T) {
 	j, _ := m.readJournal(dir)
 	if j.Phase != PhaseRolledBack {
 		t.Fatal(j.Phase)
+	}
+}
+
+func TestStalePrePublishJournalWithoutGenerationIsClosedWithoutRollback(t *testing.T) {
+	order := []string{}
+	r := &fakeRebuild{order: &order}
+	h := &fakeHealth{order: &order}
+	m := manager(t, r, h)
+	dir := filepath.Join(m.Root, "transactions", "pre-publish")
+	if e := m.writeJournal(dir, &Journal{ID: "pre-publish", Phase: PhaseRollbackFailed}); e != nil {
+		t.Fatal(e)
+	}
+
+	if e := m.Recover(context.Background()); e != nil {
+		t.Fatalf("pre-publication recovery failed: %v", e)
+	}
+	j, e := m.readJournal(dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if j.Phase != PhaseRolledBack {
+		t.Fatalf("phase = %q, want %q", j.Phase, PhaseRolledBack)
+	}
+	if r.rb != 0 {
+		t.Fatalf("pre-publication journal must not roll back a generation; calls=%d", r.rb)
 	}
 }
 func TestExclusiveLockHonorsContext(t *testing.T) {

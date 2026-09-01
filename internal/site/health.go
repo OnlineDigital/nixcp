@@ -125,8 +125,8 @@ type RealChecker struct {
 	HTTPDo func(ctx context.Context, req *http.Request) (*http.Response, error)
 }
 
-// SocketPath returns the per-site PHP-FPM socket path managed by the module.
-func SocketPath(siteID string) string { return "/run/nixcp/php-fpm/" + siteID + ".sock" }
+// SocketPath returns the per-site PHP-FPM socket path managed by NixOS.
+func SocketPath(siteID string) string { return "/run/phpfpm/nixcp-" + siteID + ".sock" }
 
 // CheckSite probes socket + HTTP for one site. It never mutates state.
 func (c RealChecker) CheckSite(ctx context.Context, domain, siteID string, desiredEnabled bool) HealthStatus {

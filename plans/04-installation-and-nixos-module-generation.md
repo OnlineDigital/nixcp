@@ -74,7 +74,7 @@ Renderer-ul produce o expresie completă, nu fragmente modificate cu regex.
 
 - un pool per site ID;
 - user = owner NixCP;
-- socket determinist sub `/run/nixcp/php-fpm/<site-id>.sock`;
+- socket determinist NixOS sub `/run/phpfpm/nixcp-<site-id>.sock`;
 - group/mode permit accesul Nginx, nu acces global;
 - config pool derivat exclusiv din manifest validat.
 

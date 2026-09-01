@@ -55,6 +55,11 @@ func runComposer(cmd *cobra.Command, runtime Runtime, args []string) error {
 		Args: argv,
 		Dir:  cwd,
 		Env:  composerEnv(os.Environ(), v),
+		// Composer is a terminal-oriented command: attach its streams directly
+		// in human mode so progress, hooks, colors, and terminal width behave
+		// exactly as a direct `composer install`. JSON mode remains captured so
+		// it can keep its one-object stdout contract.
+		Interactive: !commandJSON(cmd),
 	})
 	if runErr != nil || res.ExitCode != 0 {
 		if !commandJSON(cmd) && res.Stdout != "" {

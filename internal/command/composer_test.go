@@ -32,6 +32,9 @@ func TestComposerPassesRawArgvAndResolvedPHP(t *testing.T) {
 	if run.Name != "/etc/nixcp/php/8.3/bin/php" || run.Dir != dir {
 		t.Fatalf("unexpected command: %#v", run)
 	}
+	if !run.Interactive {
+		t.Fatal("human Composer runs must attach the caller terminal for live output")
+	}
 	want := append([]string{composerScript}, args[1:]...)
 	if strings.Join(run.Args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv changed:\n got %#v\nwant %#v", run.Args, want)
@@ -131,6 +134,9 @@ func TestComposerJSONIsSingleEnvelopeWithProcessDiagnostics(t *testing.T) {
 	}
 	if strings.Contains(buf.String(), "not raw JSON") {
 		t.Fatalf("child stdout must not break JSON envelope: %q", buf.String())
+	}
+	if len(runner.Runs) != 1 || runner.Runs[0].Interactive {
+		t.Fatal("JSON Composer runs must capture output instead of attaching the terminal")
 	}
 }
 

@@ -313,10 +313,32 @@ func (a *ApplicationRoot) Execute() int {
 		// Cobra errors are intentionally silenced so NixCP can keep a stable
 		// JSON envelope. The human-facing path must still surface the typed
 		// error, otherwise users receive only an opaque exit code.
-		fmt.Fprintln(a.Root.ErrOrStderr(), appErr)
+		writeHumanError(a.Root.ErrOrStderr(), appErr)
 	}
 
 	return int(appErr.ExitCode())
+}
+
+// writeHumanError is the single non-JSON error renderer. Keep diagnostics on
+// stderr so normal stdout remains usable in shell pipelines just like JSON.
+func writeHumanError(w interface{ Write([]byte) (int, error) }, appErr *errors.AppError) {
+	if appErr == nil {
+		return
+	}
+	fmt.Fprintf(w, "error [%s]: %s\n", appErr.Code, appErr.Message)
+	if appErr.Hint != "" {
+		fmt.Fprintf(w, "hint: %s\n", appErr.Hint)
+	}
+	detail := strings.TrimSpace(appErr.Details)
+	if detail == "" && appErr.Cause != nil {
+		candidate := strings.TrimSpace(appErr.Cause.Error())
+		if candidate != "" && candidate != appErr.Message {
+			detail = candidate
+		}
+	}
+	if detail != "" {
+		fmt.Fprintf(w, "details: %s\n", detail)
+	}
 }
 
 // appErrDiagnostics converts an AppError's process-passthrough metadata into

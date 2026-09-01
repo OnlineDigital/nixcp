@@ -142,7 +142,17 @@ func TestHumanErrorIsWrittenToStderr(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Fatalf("human error must not write to stdout: %q", stdout.String())
 	}
-	if got := stderr.String(); !strings.Contains(got, "not_configured") || !strings.Contains(got, "Run: ncp install") {
+	if got := stderr.String(); !strings.Contains(got, "error [not_configured]") || !strings.Contains(got, "hint: Run: ncp install") {
 		t.Fatalf("missing actionable human error on stderr: %q", got)
+	}
+}
+
+func TestHumanErrorIncludesDetail(t *testing.T) {
+	err := apperrors.New("systemd_error", "nginx failed", "Inspect the unit journal", apperrors.ExitCodeHealth)
+	err.Details = "permission denied"
+	var stderr bytes.Buffer
+	writeHumanError(&stderr, err)
+	if got := stderr.String(); got != "error [systemd_error]: nginx failed\nhint: Inspect the unit journal\ndetails: permission denied\n" {
+		t.Fatalf("unexpected human error: %q", got)
 	}
 }

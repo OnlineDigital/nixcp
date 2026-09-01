@@ -115,21 +115,23 @@ func (a Adapter) check(ctx context.Context, n Name) error {
 	var args []string
 	switch n {
 	case Nginx:
-		// Nginx validates its PID and log paths as part of `-t`; on NixOS
-		// those are normally root-owned. Use the same controlled sudo boundary
-		// as switch/restart so a valid active config is not falsely rejected.
-		name, args = "sudo", []string{"--", "/run/current-system/sw/bin/nginx", "-t"}
+		// Status already proved nginx.service is active. NixOS may keep the
+		// service package out of both the user's PATH and the system profile,
+		// so invoking `nginx -t` here is not a reliable health check. The
+		// listener check below proves that the active service exposes HTTP.
 	case MariaDB:
 		name, args = "mysqladmin", []string{"ping", "--protocol=socket"}
 	case Valkey:
 		name, args = "valkey-cli", []string{"-h", "127.0.0.1", "ping"}
 	}
-	res, err := a.run(ctx, name, args)
-	if err != nil {
-		return commandError(string(n)+" health", res, err)
-	}
-	if n == Valkey && strings.TrimSpace(res.Stdout) != "PONG" {
-		return fmt.Errorf("valkey health returned unexpected response")
+	if name != "" {
+		res, err := a.run(ctx, name, args)
+		if err != nil {
+			return commandError(string(n)+" health", res, err)
+		}
+		if n == Valkey && strings.TrimSpace(res.Stdout) != "PONG" {
+			return fmt.Errorf("valkey health returned unexpected response")
+		}
 	}
 	// Listener locality is checked with a fixed, non-shell command. Public
 	// listeners are rejected for data services; nginx must expose only HTTP.

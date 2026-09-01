@@ -41,16 +41,17 @@ type ConfigVerifier interface {
 	Verify(context.Context) error
 }
 
-// NginxConfigVerifier invokes nginx through controlled sudo with fixed argv.
-// nginx -t reads the active default configuration and does not reload it, but
-// may need root access to the active PID and log paths.
+// NginxConfigVerifier verifies that systemd accepted and started the active
+// Nginx configuration. NixOS service packages are not guaranteed to be in a
+// user's PATH or the system profile, so this deliberately does not invoke an
+// nginx binary directly.
 type NginxConfigVerifier struct{ Runner execx.Runner }
 
 func (v NginxConfigVerifier) Verify(ctx context.Context) error {
 	if v.Runner == nil {
 		return fmt.Errorf("nginx configuration verifier is not configured")
 	}
-	result, err := v.Runner.Run(ctx, &execx.Command{Name: "sudo", Args: []string{"--", "/run/current-system/sw/bin/nginx", "-t"}, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
+	result, err := v.Runner.Run(ctx, &execx.Command{Name: "systemctl", Args: []string{"is-active", "--quiet", "nginx.service"}, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
 	if err != nil || result.ExitCode != 0 {
 		detail := strings.TrimSpace(result.Stderr)
 		if detail == "" {

@@ -24,6 +24,6 @@
     root = "/home";
     extraConfig = "";
     locations."/".extraConfig = "try_files $uri $uri/ /index.php?$query_string;";
-    locations."~ \.php$".extraConfig = "include \${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:/run/nixcp/php-fpm/example-test.sock;";
+    locations."~ \.php$".extraConfig = "include ${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:/run/nixcp/php-fpm/example-test.sock;";
   };
 }

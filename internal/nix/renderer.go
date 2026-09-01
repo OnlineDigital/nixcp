@@ -185,7 +185,12 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner string) {
 		content = "try_files $uri $uri/ =404;"
 	}
 	fmt.Fprintf(b, "    locations.\"/\".extraConfig = %s;\n", nixString(content))
-	fmt.Fprintf(b, "    locations.\"~ \\.php$\".extraConfig = %s;\n", nixString("include "+"${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:"+socket+";"))
+	// Keep the Nix package interpolation intentional: nixString escapes `${…}`
+	// in dynamic text, but Nginx must receive the resolved store path rather
+	// than the literal characters `${pkgs.nginx}`.
+	fastCGI := "include @NGINX@/conf/fastcgi.conf; fastcgi_pass unix:" + socket + ";"
+	fastCGIEncoded := strings.ReplaceAll(nixString(fastCGI), "@NGINX@", "${pkgs.nginx}")
+	fmt.Fprintf(b, "    locations.\"~ \\.php$\".extraConfig = %s;\n", fastCGIEncoded)
 	b.WriteString("  };\n")
 }
 

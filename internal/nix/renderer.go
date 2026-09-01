@@ -38,7 +38,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	renderMariaDBAccounts(&b, s.Config, s.Sites)
 	renderPHP(&b, s.Config)
 	for _, site := range sortedSites(s.Sites) {
-		renderSite(&b, site, s.Config.Owner.Username)
+		renderSite(&b, site, s.Config.Owner.Username, s.Config.Owner.Group)
 	}
 	b.WriteString("}\n")
 	return []byte(b.String()), nil
@@ -163,7 +163,7 @@ func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
 	}
 }
 
-func renderSite(b *strings.Builder, s state.SiteConfig, owner string) {
+func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string) {
 	if !s.Enabled {
 		return
 	}
@@ -178,7 +178,7 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner string) {
 	// allowing the pool to grow unbounded. `ondemand` cannot meet that minimum:
 	// it always begins with zero workers. Recycling at 200 requests bounds
 	// long-lived worker memory in development.
-	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = pkgs.%s; settings = { \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(owner), entry.Nixpkgs)
+	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = pkgs.%s; settings = { \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(group), entry.Nixpkgs)
 	fmt.Fprintf(b, "  services.nginx.virtualHosts.%s = {\n", nixString(s.Domain))
 	b.WriteString("    listen = [{ addr = \"0.0.0.0\"; port = 80; }];\n")
 	fmt.Fprintf(b, "    root = %s;\n", nixString(s.DocumentRoot))

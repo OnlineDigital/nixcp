@@ -151,7 +151,9 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 
 	root := &cobra.Command{
 		Use:           "ncp",
-		Short:         "NixCP CLI",
+		Short:         "NixOS development-site control plane",
+		Long:          "NixCP manages PHP runtimes, Nginx, local databases, and HTTP sites through validated, rollback-capable NixOS transactions. Use `ncp help <command>` for details and examples at every command level.",
+		Example:       "  ncp install\n  ncp service nginx install\n  ncp php install 8.4\n  ncp help php\n  ncp help php install",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {

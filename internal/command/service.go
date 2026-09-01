@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"strings"
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/output"
@@ -17,28 +18,33 @@ import (
 )
 
 func newServiceCommand(runtime Runtime) *cobra.Command {
-	cmd := &cobra.Command{Use: "service", Short: "Manage allowlisted platform services"}
+	cmd := &cobra.Command{
+		Use:     "service",
+		Short:   "Manage allowlisted platform services",
+		Long:    "Install, start, stop, restart, or inspect the Nginx, MariaDB, and Valkey services managed by NixCP.",
+		Example: "  ncp service nginx install\n  ncp service mariadb start\n  ncp service valkey status",
+	}
 	for _, name := range []service.Name{service.Nginx, service.MariaDB, service.Valkey} {
 		cmd.AddCommand(newServiceSubcommand(runtime, name))
 	}
 	return cmd
 }
 func newServiceAliasCommand(runtime Runtime, name service.Name) *cobra.Command {
-	cmd := &cobra.Command{Use: string(name), Short: string(name) + " service alias"}
+	cmd := &cobra.Command{Use: string(name), Short: string(name) + " service alias", Long: "Convenience alias for `ncp service " + string(name) + "`.", Example: "  ncp " + string(name) + " status"}
 	for _, action := range []string{"install", "start", "status", "stop", "restart"} {
 		cmd.AddCommand(newServiceAction(runtime, name, action))
 	}
 	return cmd
 }
 func newServiceSubcommand(runtime Runtime, name service.Name) *cobra.Command {
-	cmd := &cobra.Command{Use: string(name), Short: string(name) + " service"}
+	cmd := &cobra.Command{Use: string(name), Short: string(name) + " service", Long: "Manage the NixCP " + string(name) + " service.", Example: "  ncp service " + string(name) + " install\n  ncp service " + string(name) + " status"}
 	for _, action := range []string{"install", "start", "status", "stop", "restart"} {
 		cmd.AddCommand(newServiceAction(runtime, name, action))
 	}
 	return cmd
 }
 func newServiceAction(runtime Runtime, name service.Name, action string) *cobra.Command {
-	return &cobra.Command{Use: action, Short: action + " service " + string(name), Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return runService(cmd, runtime, name, action) }}
+	return &cobra.Command{Use: action, Short: action + " service " + string(name), Long: strings.Title(action) + " the NixCP " + string(name) + " service through a validated NixOS transaction.", Example: "  ncp service " + string(name) + " " + action, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return runService(cmd, runtime, name, action) }}
 }
 
 func runService(cmd *cobra.Command, runtime Runtime, name service.Name, action string) error {

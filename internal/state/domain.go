@@ -145,7 +145,7 @@ func IsValidRebuildMode(mode string) bool {
 // IsSupportedPHPVersion is the explicit v1 nixpkgs catalog boundary.
 func IsSupportedPHPVersion(version string) bool {
 	switch version {
-	case "8.3", "8.4":
+	case "8.2", "8.3", "8.4", "8.5":
 		return true
 	default:
 		return false

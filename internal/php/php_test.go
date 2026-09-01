@@ -9,14 +9,24 @@ import (
 )
 
 func TestCatalogOnlyAcceptsExplicitVersionsAndExtensions(t *testing.T) {
-	if _, err := NormalizeVersion("8.2"); err == nil {
-		t.Fatal("8.2 must not be accepted")
+	for _, version := range []string{"8.2", "8.3", "8.4", "8.5"} {
+		if got, err := NormalizeVersion(version); err != nil || got != version {
+			t.Fatalf("unexpected version result %q, %v", got, err)
+		}
 	}
-	if v, err := NormalizeVersion("8.3"); err != nil || v != "8.3" {
-		t.Fatalf("unexpected version result %q, %v", v, err)
+	if _, err := NormalizeVersion("8.1"); err == nil {
+		t.Fatal("8.1 must not be accepted")
 	}
-	if _, err := NormalizeExtension("imagick"); err == nil {
+	for _, extension := range []string{"imagick", "redis", "xdebug"} {
+		if got, err := NormalizeExtension(extension); err != nil || got != extension {
+			t.Fatalf("unexpected extension result %q, %v", got, err)
+		}
+	}
+	if _, err := NormalizeExtension("not-a-real-extension"); err == nil {
 		t.Fatal("non-catalog extension must be rejected")
+	}
+	if _, ok := Compatible("8.5", "opcache"); ok {
+		t.Fatal("PHP 8.5 must not request nixpkgs' removed opcache extension attribute")
 	}
 }
 func TestResolvePrecedenceAndInstalledRequirement(t *testing.T) {

@@ -45,6 +45,33 @@ func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
 	}
 }
 
+func TestHelpSupportsNestedCommandPaths(t *testing.T) {
+	for _, path := range [][]string{
+		{"help"},
+		{"help", "php"},
+		{"help", "php", "install"},
+		{"help", "php", "uninstall"},
+		{"help", "php", "use"},
+		{"help", "php", "ext", "install"},
+		{"help", "service", "nginx", "install"},
+	} {
+		root, err := NewRootCommand(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		root.SetOut(&out)
+		root.SetErr(&bytes.Buffer{})
+		root.SetArgs(path)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("ncp %s failed: %v", strings.Join(path, " "), err)
+		}
+		if !strings.Contains(out.String(), "Usage:") || !strings.Contains(out.String(), "Examples:") {
+			t.Fatalf("ncp %s did not provide detailed help:\n%s", strings.Join(path, " "), out.String())
+		}
+	}
+}
+
 func TestStatusJSONOutputIsSingleObject(t *testing.T) {
 	app, err := New(context.Background())
 	if err != nil {

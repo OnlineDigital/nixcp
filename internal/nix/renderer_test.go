@@ -33,6 +33,28 @@ func TestRenderIsDeterministicAndHTTPOnly(t *testing.T) {
 	}
 }
 
+func TestRenderPHP85SkipsUnavailableOpcacheAttribute(t *testing.T) {
+	c := state.ConfigSnapshot{
+		SchemaVersion: 2,
+		Owner:         state.Owner{Username: "u", Group: "g", Home: "/tmp/u"},
+		Platform:      state.Platform{System: "x86_64-linux"},
+		Rebuild:       state.RebuildConfig{Mode: "traditional"},
+		Services:      state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}},
+		PHP:           state.PHPConfig{Installed: []string{"8.5"}, Extensions: []string{"opcache", "redis"}},
+	}
+	b, err := (Renderer{}).Render(state.Snapshot{Config: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, "pkgs.php85.withExtensions") || !strings.Contains(text, "all.redis") {
+		t.Fatalf("PHP 8.5 render missed supported extension:\n%s", text)
+	}
+	if strings.Contains(text, "all.opcache") {
+		t.Fatalf("PHP 8.5 rendered unavailable opcache extension:\n%s", text)
+	}
+}
+
 func TestMariaDBAccountsSQL(t *testing.T) {
 	const pw = "nixcp-fixture-password-123456789"
 	sites := []state.SiteConfig{

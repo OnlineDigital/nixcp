@@ -463,3 +463,68 @@ func TestExtensionInstallUnavailableForInstalledVersions(t *testing.T) {
 		t.Fatalf("expected redis PHP extension to be available for installed 8.3, got error: %v", err)
 	}
 }
+
+func TestPHPUninstallRemovesVersionAndClearsGlobalDefault(t *testing.T) {
+	home := t.TempDir()
+	u, _ := user.Current()
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3", "8.4"}, GlobalDefault: "8.3"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	rt := defaultRuntime()
+	rt.Runner = &execx.FakeRunner{}
+	rt.StateHome = home
+	rt.Transactions = testTransaction(home)
+	root, err := NewRootCommand(context.Background(), func(r *Runtime) { *r = rt })
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.SetArgs([]string{"php", "uninstall", "8.3"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("uninstall failed: %v", err)
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(snap.Config.PHP.Installed, ",") != "8.4" || snap.Config.PHP.GlobalDefault != "" {
+		t.Fatalf("unexpected PHP state: %#v", snap.Config.PHP)
+	}
+}
+
+func TestPHPUninstallRefusesVersionUsedBySite(t *testing.T) {
+	home := t.TempDir()
+	u, _ := user.Current()
+	store := state.NewStore(home)
+	cfg := initialConfig(u, os.Getuid(), os.Getgid(), u.Username, "", false)
+	cfg.Owner.Home = home
+	cfg.PHP = state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}
+	cfg.Services.Nginx.Installed = true
+	project := t.TempDir()
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Sites = []state.SiteConfig{{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}}}
+	if err := store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	rt := defaultRuntime()
+	rt.Runner = &execx.FakeRunner{}
+	rt.StateHome = home
+	rt.Transactions = testTransaction(home)
+	root, err := NewRootCommand(context.Background(), func(r *Runtime) { *r = rt })
+	if err != nil {
+		t.Fatal(err)
+	}
+	root.SetArgs([]string{"php", "uninstall", "8.3"})
+	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "php_version_in_use") {
+		t.Fatalf("expected in-use refusal, got %v", err)
+	}
+}

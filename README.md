@@ -105,10 +105,14 @@ the Laravel `.env` file before running migrations.
 
 ## Supported surface
 
-Run `ncp help` for the complete contract. The supported PHP/nixpkgs catalog is
-currently PHP **8.3** and **8.4**, with `curl`, `intl`, `mbstring`, `opcache`,
-`pdo_mysql`, and `redis` when available in the selected nixpkgs package set.
-NixCP does not download PECL extensions or unsupported PHP releases.
+Run `ncp help` for the complete contract, `ncp help php` for PHP usage, and
+`ncp help php install` (or any other command path) for focused examples. The
+NixOS 26.05 nixpkgs catalog currently supports PHP **8.2**, **8.3**, **8.4**,
+and **8.5**. NixCP exposes the curated extensions `apcu`, `bcmath`, `curl`,
+`gd`, `imagick`, `intl`, `mbstring`, `mysqli`, `pdo_mysql`, `pdo_pgsql`,
+`pdo_sqlite`, `redis`, `soap`, `sockets`, `xdebug`, `xml`, and `zip` on all
+four versions; `opcache` is available on PHP 8.2–8.4. NixCP does not download
+PECL extensions or unsupported PHP releases.
 
 All scriptable commands support `--json`; it emits exactly one JSON object on
 stdout and implies `--no-input`. Persisted changes are idempotent; a no-op

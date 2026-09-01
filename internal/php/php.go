@@ -16,9 +16,44 @@ type Version struct {
 }
 
 // Catalog is deliberately explicit: NixCP never guesses attributes or fetches PHP externally.
+//
+// The entries track the PHP attributes exposed by nixpkgs/nixos-26.05. Keep this
+// list intentionally curated: each version's extension map records exactly the
+// attributes available through its corresponding phpXX.extensions set.
 var Catalog = map[string]Version{
-	"8.3": {Version: "8.3", Nixpkgs: "php83", Extensions: map[string]string{"curl": "curl", "intl": "intl", "mbstring": "mbstring", "opcache": "opcache", "pdo_mysql": "pdo_mysql", "redis": "redis"}},
-	"8.4": {Version: "8.4", Nixpkgs: "php84", Extensions: map[string]string{"curl": "curl", "intl": "intl", "mbstring": "mbstring", "opcache": "opcache", "pdo_mysql": "pdo_mysql", "redis": "redis"}},
+	"8.2": {Version: "8.2", Nixpkgs: "php82", Extensions: extensionsWithOpcache()},
+	"8.3": {Version: "8.3", Nixpkgs: "php83", Extensions: extensionsWithOpcache()},
+	"8.4": {Version: "8.4", Nixpkgs: "php84", Extensions: extensionsWithOpcache()},
+	"8.5": {Version: "8.5", Nixpkgs: "php85", Extensions: commonExtensions},
+}
+
+var commonExtensions = map[string]string{
+	"apcu":       "apcu",
+	"bcmath":     "bcmath",
+	"curl":       "curl",
+	"gd":         "gd",
+	"imagick":    "imagick",
+	"intl":       "intl",
+	"mbstring":   "mbstring",
+	"mysqli":     "mysqli",
+	"pdo_mysql":  "pdo_mysql",
+	"pdo_pgsql":  "pdo_pgsql",
+	"pdo_sqlite": "pdo_sqlite",
+	"redis":      "redis",
+	"soap":       "soap",
+	"sockets":    "sockets",
+	"xdebug":     "xdebug",
+	"xml":        "xml",
+	"zip":        "zip",
+}
+
+func extensionsWithOpcache() map[string]string {
+	result := make(map[string]string, len(commonExtensions)+1)
+	for name, attribute := range commonExtensions {
+		result[name] = attribute
+	}
+	result["opcache"] = "opcache"
+	return result
 }
 
 func NormalizeVersion(raw string) (string, error) {
@@ -27,7 +62,7 @@ func NormalizeVersion(raw string) (string, error) {
 		return "", err
 	}
 	if _, ok := Catalog[v]; !ok {
-		return "", fmt.Errorf("unsupported PHP version %s; supported versions are 8.3, 8.4", v)
+		return "", fmt.Errorf("unsupported PHP version %s; supported versions are 8.2, 8.3, 8.4, 8.5", v)
 	}
 	return v, nil
 }

@@ -54,8 +54,9 @@ document why elevated container privileges are required before using them.
 | Layer | Coverage |
 | --- | --- |
 | Go unit/property | strict YAML; domains/paths/DB names; PHP precedence; extension warnings; Nix and shell escaping; JSON envelopes; service state; no-op behavior |
+| TUI model | root model tab routing/quit/refresh, overlay confirm/select/form flows (accept + cancel), two-phase action dispatch with fake backend, failure/cancel logging in Activity, views render without panic, backend wiring: snapshot/service status/site health reads and in-process CLI mutations (envelope parse, preconditions) against a fake-adapter state home; `ncp skill` command catalog determinism/tree coverage |
 | Renderer golden | empty module; service running/stopped policies; multi-PHP/extensions; Laravel/WordPress/generic/custom; multi-site/FPM; MariaDB; adversarial escaping |
-| Integration/fault | temporary HOME/fake adapters, aliases, lock timeout, every build/publish/switch/health/rollback branch, stale journal recovery, PHP/Artisan argv and non-destructive unlink |
+| Integration/fault | temporary HOME/fake adapters, aliases, lock timeout, every build/publish/switch/health/rollback branch, stale journal recovery, PHP/Artisan argv and non-destructive unlink; shortcut pass-through (`a`, `am`, `tinker`, `ci`) with appended args/flags, global-flag stripping, and child exit-code propagation |
 | Real shell | bash/zsh/fish source/delegation, current-shell activation, independent sessions, PATH de-duplication and injection resistance |
 | Nix evaluation | empty and golden states, PHP attributes/extensions, `x86_64-linux` assertion, candidate wrapper, no TLS/ACME options |
 | NixOS VM (release gate) | bootstrap, each service lifecycle/reboot, local listeners, two PHP sites, Laravel/WordPress/custom, MariaDB grants, rollback/kill recovery, retained HTTP response |

@@ -78,11 +78,17 @@ ncp php use --global <version>
 ncp php [php-args...]
 ncp artisan [artisan-args...]
 ncp composer [composer-args...]
+ncp a [artisan-args...]          # shortcut: ncp artisan <args…>
+ncp am [artisan-migrate-args...]  # shortcut: ncp artisan migrate <args…>
+ncp tinker [artisan-tinker-args...]  # shortcut: ncp artisan tinker <args…>
+ncp ci [composer-install-args...]  # shortcut: ncp composer install <args…>
 ncp link <domain> [flags]
 ncp unlink <domain-or-site-id>
 ncp sites list
 ncp sites show <domain-or-site-id>
 ncp shell init <bash|zsh|fish>
+ncp skill
+ncp tui
 ```
 
 Aliasurile top-level pentru servicii folosesc exact același handler ca `ncp service`; nu există diferențe de stare sau output JSON.
@@ -173,9 +179,19 @@ ncp artisan make:controller UserController
 ncp artisan tinker
 ncp composer install --no-dev
 ncp composer require laravel/ui
+ncp a migrate:fresh --seed --force
+ncp am --step=2
+ncp tinker
+ncp ci --prefer-dist --no-interaction
 ```
 
 Argumentele sunt transmise identic, fără shell intermediar. `ncp artisan` cere ca `./artisan` să fie regular/readable și execută echivalentul `php ./artisan ...`. Semnalele și exit code-ul sunt propagate. `ncp composer` rulează același resolver PHP (calea stabilă din sesiunea/proiectul curent) peste scriptul sistem-own de la `/etc/nixcp/composer/bin/composer`; argumentele îi sunt transmise verbatim, iar exit code-ul Composer este returnat neschimbat — util pentru scripturi bazate pe Composer din proiecte PHP.
+
+Shortcut-urile `a`, `am`, `tinker` și `ci` refolosesc exact aceleași code paths ca `ncp artisan`/`ncp composer`: orice argument sau flag adăugat după shortcut este trimis mai departe verbatim (prefixul fix — `migrate`, `tinker`, `install` — este injectat înaintea argv-ului utilizatorului), flag-urile globale NixCP (`--json`, `--timeout`, `--no-input`, `--yes`) sunt consumate de pre-run și niciodată scăpate în argv-ul copilului, TTY-ul este atașat pentru `tinker`, iar exit code-ul procesului copil se propagă neschimbat.
+
+`ncp skill` tipărește referința completă de comenzi — toate căile, synopsis-urile, flag-urile și exemplele, plus footer-ul de flag-uri globale — într-un singur bloc text (sau JSON cu `--json`), dimensionat pentru a fi lipit în prompturi de unelte sau documentație.
+
+`ncp tui` pornește panoul interactiv (5 taburi: Status/Sites/PHP/Services/Activity) doar pe TTY; refuză cu `tui_requires_tty` + exit 2 în non-TTY. Panoul nu implementează logică de business proprie: fiecare mutație rulează CLI-ul real in-process (cu `--json --no-input`), prin același pipeline validate → render → tranzacție blocată. `ncp` gol, interactiv, deschide panoul; în non-TTY rămâne banner-ul `NixCP CLI <version>` byte-stabil (contractul scripturilor).
 
 ### Link site
 

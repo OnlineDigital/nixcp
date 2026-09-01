@@ -18,6 +18,8 @@ import (
 	"github.com/nixcp/nixcp/internal/service"
 	sitepkg "github.com/nixcp/nixcp/internal/site"
 	"github.com/nixcp/nixcp/internal/transaction"
+	"github.com/nixcp/nixcp/internal/tui"
+	"github.com/nixcp/nixcp/internal/ui"
 	"github.com/spf13/cobra"
 )
 
@@ -148,7 +150,6 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	for _, opt := range opts {
 		opt(&runtime)
 	}
-
 	root := &cobra.Command{
 		Use:           "ncp",
 		Short:         "NixOS development-site control plane",
@@ -157,6 +158,14 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Bare `ncp` on an interactive terminal opens the panel; piped and
+			// scripted invocations keep the version banner (byte-stable).
+			if len(args) == 0 && !commandJSON(cmd) && ui.StdinIsTTY() && ui.StdoutIsTTY() {
+				if err := tui.Run(NewTUIBackend(runtime, opts...)); err != nil {
+					return errors.New("tui_failed", fmt.Sprintf("interactive panel failed: %v", err), "", errors.ExitCodeRuntime)
+				}
+				return nil
+			}
 			if commandJSON(cmd) {
 				payload := output.Success("ncp", false, map[string]any{"version": runtime.Metadata.Version}, nil)
 				return emitJSON(cmd, payload)
@@ -229,10 +238,16 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newServiceAliasCommand(runtime, service.Valkey))
 	root.AddCommand(newPHPCommand(runtime))
 	root.AddCommand(newArtisanCommand(runtime))
+	root.AddCommand(newArtisanAliasCommand(runtime, "a", "artisan shortcut", nil))
+	root.AddCommand(newArtisanAliasCommand(runtime, "am", "artisan migrate shortcut", []string{"migrate"}))
+	root.AddCommand(newArtisanAliasCommand(runtime, "tinker", "artisan tinker shortcut", []string{"tinker"}))
 	root.AddCommand(newComposerCommand(runtime))
+	root.AddCommand(newComposerAliasCommand(runtime, "ci", "composer install shortcut", []string{"install"}))
 	root.AddCommand(newLinkCommand(runtime))
 	root.AddCommand(newUnlinkCommand(runtime))
 	root.AddCommand(newSitesCommand(runtime))
+	root.AddCommand(newTUICommand(runtime, opts...))
+	root.AddCommand(newSkillCommand())
 	root.AddCommand(newShellCommand())
 	root.AddCommand(newVersionCommand(runtime.Metadata))
 

@@ -116,9 +116,12 @@ ncp sites list
 ncp sites show <domeniu|site-id>
 
 ncp shell init bash|zsh|fish
+
+ncp skill                # referința completă de comenzi (text/json)
+ncp tui                 # panou interactiv (doar TTY)
 ```
 
-Comenzile persistente sunt idempotente și trec prin aceeași tranzacție. `restart` este operațional și nu schimbă starea declarată. `status` compară starea dorită cu starea systemd reală.
+Comenzile persistente sunt idempotente și trec prin aceeași tranzacție. `restart` este operațional și nu schimbă starea declarată. `status` compară starea dorită cu starea systemd reală. `ncp` gol, rulat interactiv (TTY), deschide panoul TUI; în non-TTY rămâne banner-ul de versiune. Detaliile TUI în [planul 11](11-tui-interactive-panel.md).
 
 ## 7. Selecția PHP
 
@@ -214,3 +217,4 @@ Produsul v1 este gata când:
 - [08 — site-uri, Nginx și MariaDB](08-sites-nginx-and-databases.md)
 - [09 — securitate, permisiuni și validare](09-security-permissions-and-validation.md)
 - [10 — testare, milestone-uri și release](10-testing-milestones-and-release.md)
+- [11 — TUI interactiv](11-tui-interactive-panel.md)

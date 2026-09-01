@@ -346,7 +346,9 @@ func runUnlink(cmd *cobra.Command, runtime Runtime, key string) error {
 }
 func newSitesCommand(runtime Runtime) *cobra.Command {
 	cmd := &cobra.Command{Use: "sites", Short: "List and show site entries"}
-	cmd.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return runSitesList(c, runtime) }}, &cobra.Command{Use: "show <domain-or-site-id>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return runSitesShow(c, runtime, a[0]) }})
+	listCmd := &cobra.Command{Use: "list", Short: "List linked sites", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error { return runSitesList(c, runtime) }}
+	showCmd := &cobra.Command{Use: "show <domain-or-site-id>", Short: "Show one site's manifest and runtime details", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return runSitesShow(c, runtime, a[0]) }}
+	cmd.AddCommand(listCmd, showCmd)
 	return cmd
 }
 func runSitesList(cmd *cobra.Command, runtime Runtime) error {

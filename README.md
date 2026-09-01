@@ -96,6 +96,12 @@ ncp link example.test --template laravel --php 8.4
 # Common Laravel commands run with the PHP version resolved by NixCP.
 ncp artisan key:generate
 ncp artisan migrate
+
+# Shortcuts: aliases that forward any extra arguments and flags verbatim.
+ncp a make:model Post --migration     # ncp artisan make:model Post --migration
+ncp am --seed                         # ncp artisan migrate --seed
+ncp tinker                            # ncp artisan tinker
+ncp ci --prefer-dist                  # ncp composer install --prefer-dist
 ```
 
 To create a dedicated local MariaDB database at link time, first run
@@ -117,6 +123,28 @@ PECL extensions or unsupported PHP releases.
 All scriptable commands support `--json`; it emits exactly one JSON object on
 stdout and implies `--no-input`. Persisted changes are idempotent; a no-op
 reports `changed:false` and does not rebuild.
+
+The `a`, `am`, `tinker`, and `ci` commands are pass-through shortcuts:
+`ncp a <args…>` runs `ncp artisan <args…>`, `ncp am [flags…]` runs
+`ncp artisan migrate [flags…]`, `ncp tinker [args…]` runs
+`ncp artisan tinker [args…]`, and `ncp ci [flags…]` runs
+`ncp composer install [flags…]`. Anything appended after the shortcut —
+arguments or flags — is forwarded to the wrapped tool unchanged, and NixCP's
+own global flags (`--json`, `--timeout`, …) are consumed before the call, never
+leaked into the child argv.
+
+`ncp skill` prints the full command reference — every command path with its
+synopsis, flags, and examples — as one text block for pasting into tool
+prompts or docs. `ncp skill --json` returns the same catalog as JSON.
+
+`ncp tui` opens the interactive panel: five tabs (Status, Sites, PHP,
+Services, Activity) over the exact same use-cases as the CLI. The panel adds
+no business logic — every mutation runs the real CLI pipeline
+(validate → render → locked transaction) in-process, and every change lands
+in the same YAML desired state. It refuses to start on non-TTY stdio
+(`tui_requires_tty`), and running bare `ncp` in an interactive terminal
+opens the panel while piped/script invocations keep printing the version
+banner.
 
 ## Security and limitations
 

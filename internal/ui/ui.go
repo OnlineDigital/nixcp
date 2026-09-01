@@ -39,6 +39,13 @@ func isTTY(f *os.File) bool {
 	return term.IsTerminal(f.Fd())
 }
 
+// StdinIsTTY reports whether stdin is attached to a terminal. Used by the
+// TUI launcher to decide whether the interactive panel can render.
+func StdinIsTTY() bool { return isTTY(os.Stdin) }
+
+// StdoutIsTTY reports whether stdout is attached to a terminal.
+func StdoutIsTTY() bool { return isTTY(os.Stdout) }
+
 // SelectOption is one entry of a single-choice prompt.
 type SelectOption struct {
 	Value string

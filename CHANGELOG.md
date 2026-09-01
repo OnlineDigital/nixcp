@@ -7,6 +7,36 @@ and generated-module marker compatibility are part of the release contract.
 
 ### Added
 
+- Interactive panel (`ncp tui`): a bubbletea-based tabbed interface with five
+  tabs — Status (overview + drift), Sites (list, link form, health probe,
+  unlink), PHP (installed versions, install/uninstall/use-global, curated
+  extension install), Services (desired vs actual with install/start/stop/
+  restart), and Activity (session log). The panel implements zero business
+  logic: every mutation executes the real CLI command in-process with
+  `--json --no-input`, going through the same validate → render → locked
+  transaction pipeline, so YAML desired state stays the single source of
+  truth. Reads (snapshot, service status, site health) go through the same
+  adapters the CLI uses. Confirm overlays guard destructive actions
+  (unlink, php uninstall, service stop), `ctrl+c` cancels the in-flight
+  action (transaction rollback unwinds partial state), and the panel refuses
+  non-TTY stdio with `tui_requires_tty`. Bare `ncp` in an interactive
+  terminal opens the panel; piped invocations keep the byte-stable version
+  banner.
+- `ncp skill`: prints the complete command reference — every command path
+  (62 commands) with synopsis, flags, and examples, plus the global-flags
+  footer — as one text block sized for pasting into tool prompts or docs.
+  `ncp skill --json` returns the same catalog as a single JSON envelope.
+- Command shortcuts with full argv pass-through: `ncp a <args…>` runs
+  `ncp artisan <args…>`, `ncp am [flags…]` runs `ncp artisan migrate [flags…]`,
+  `ncp tinker [args…]` runs `ncp artisan tinker [args…]`, and `ncp ci [flags…]`
+  runs `ncp composer install [flags…]`. Any arguments or flags appended after a
+  shortcut are forwarded to the wrapped tool verbatim; NixCP's own global flags
+  are still honored and stripped from the child argv.
+- `ncp artisan` now forwards its raw argv to artisan untouched
+  (`DisableFlagParsing`), so artisan options such as `--seed` or `--force` no
+  longer collide with NixCP's flag parser; the tinker REPL keeps its TTY
+  passthrough and exit-code propagation.
+
 - Stage 10 release validation, CI, reproducible build metadata, security and
   operator documentation.
 - Golden renderer regression coverage, transaction fault matrix coverage, and

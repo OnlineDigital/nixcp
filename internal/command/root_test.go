@@ -29,10 +29,27 @@ func TestNewRootCommandHasGlobalFlagsAndCommands(t *testing.T) {
 		}
 	}
 
-	commands := []string{"install", "status", "doctor", "service", "php", "artisan", "composer", "link", "unlink", "sites", "shell", "version"}
+	commands := []string{"install", "status", "doctor", "service", "php", "artisan", "composer", "link", "unlink", "sites", "tui", "skill", "shell", "version"}
 	for _, c := range commands {
 		if cmd, _, err := root.Find([]string{c}); err != nil || cmd == nil {
 			t.Fatalf("missing command %q (err=%v)", c, err)
+		}
+	}
+
+	// Pass-through shortcuts must exist and mirror their target command.
+	shortcuts := []struct{ alias, target string }{
+		{"a", "artisan"},
+		{"am", "artisan"},
+		{"tinker", "artisan"},
+		{"ci", "composer"},
+	}
+	for _, s := range shortcuts {
+		cmd, _, err := root.Find([]string{s.alias})
+		if err != nil || cmd == nil {
+			t.Fatalf("missing shortcut %q (err=%v)", s.alias, err)
+		}
+		if !cmd.DisableFlagParsing {
+			t.Fatalf("shortcut %q must keep DisableFlagParsing so user flags pass through", s.alias)
 		}
 	}
 

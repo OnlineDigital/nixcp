@@ -115,7 +115,10 @@ func (a Adapter) check(ctx context.Context, n Name) error {
 	var args []string
 	switch n {
 	case Nginx:
-		name, args = "nginx", []string{"-t"}
+		// Nginx validates its PID and log paths as part of `-t`; on NixOS
+		// those are normally root-owned. Use the same controlled sudo boundary
+		// as switch/restart so a valid active config is not falsely rejected.
+		name, args = "sudo", []string{"--", "nginx", "-t"}
 	case MariaDB:
 		name, args = "mysqladmin", []string{"ping", "--protocol=socket"}
 	case Valkey:

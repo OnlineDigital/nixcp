@@ -143,9 +143,10 @@ func renderMariaDBAccounts(b *strings.Builder, c state.ConfigSnapshot, sites []s
 
 func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
 	if len(c.PHP.Installed) > 0 {
-		// Keep Composer system-owned and at a stable absolute path. The CLI
-		// runs this PHP script through the project-resolved PHP binary.
-		b.WriteString("  environment.etc.\"nixcp/composer/bin/composer\".source = \"${pkgs.phpPackages.composer}/bin/composer\";\n")
+		// Expose Composer's PHAR, not its Nix launcher. The CLI executes this
+		// PHP script through the project-resolved PHP binary; passing the ELF
+		// launcher to PHP would make PHP print binary data instead.
+		b.WriteString("  environment.etc.\"nixcp/composer/bin/composer\".source = \"${pkgs.phpPackages.composer}/libexec/composer/composer.phar\";\n")
 	}
 	for _, v := range c.PHP.Installed {
 		entry, ok := php.Catalog[v]

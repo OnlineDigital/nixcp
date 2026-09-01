@@ -11,7 +11,7 @@
   services.redis.package = pkgs.valkey;
   services.redis.servers.nixcp = { enable = true; bind = "127.0.0.1"; port = 6379; };
   services.mysql.ensureDatabases = [ "app" ];
-  environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/bin/composer";
+  environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/libexec/composer/composer.phar";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
   environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
 }

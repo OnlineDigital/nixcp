@@ -196,7 +196,14 @@ func defaultServiceTransaction(root string, rt Runtime, rebuild state.RebuildCon
 			args = append(args, "--impure")
 		}
 	}
-	return &transaction.Manager{Root: root, Locker: transaction.FlockLocker{Path: filepath.Join(root, "lock")}, Rebuilder: rebuildpkg.NixOS{Runner: rt.Runner, SwitchArgs: args}, Health: health}
+	manager := &transaction.Manager{Root: root, Locker: transaction.FlockLocker{Path: filepath.Join(root, "lock")}, Rebuilder: rebuildpkg.NixOS{Runner: rt.Runner, SwitchArgs: args}, Health: health}
+	if rebuild.Mode == "traditional" {
+		manager.CandidateWrapper = &transaction.CandidateWrapper{
+			ExistingConfig: "/etc/nixos/configuration.nix",
+			StableModule:   filepath.Join(root, "generated", "nixcp-module.nix"),
+		}
+	}
+	return manager
 }
 func systemdError(err error) error {
 	return apperrors.New("systemd_error", err.Error(), "Inspect the unit journal and retry", apperrors.ExitCodeHealth)

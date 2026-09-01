@@ -16,6 +16,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nixcp/nixcp/internal/securefs"
 	"gopkg.in/yaml.v3"
@@ -190,12 +191,22 @@ func (h CompositeHealth) Check(ctx context.Context, affected []string) error {
 // Manager publishes a map of private files relative to Root. A missing old file
 // is represented in the backup manifest and is removed during restoration.
 type Manager struct {
-	Root      string
-	Locker    Locker
-	Rebuilder Rebuilder
-	Health    HealthChecker
-	NewID     func() string
-	Now       func() time.Time
+	Root             string
+	Locker           Locker
+	Rebuilder        Rebuilder
+	Health           HealthChecker
+	CandidateWrapper *CandidateWrapper
+	NewID            func() string
+	Now              func() time.Time
+}
+
+// CandidateWrapper makes a staged NixCP module evaluable as part of the real
+// traditional NixOS configuration. The stable module is disabled by its exact
+// path and the staged replacement is imported instead. It is deliberately
+// absent for callers that do not build NixOS modules.
+type CandidateWrapper struct {
+	ExistingConfig string
+	StableModule   string
 }
 
 type Request struct {
@@ -263,9 +274,15 @@ func (m *Manager) Apply(ctx context.Context, r Request) (Result, error) {
 	if err = m.writeJournal(dir, &j); err != nil {
 		return Result{}, err
 	}
-	candidate := filepath.Join(dir, "stage", filepath.Clean(r.CandidateModule))
 	if !safeRelative(r.CandidateModule) {
 		return Result{}, m.failBeforePublish(dir, &j, fmt.Errorf("candidate module must be a relative managed path"))
+	}
+	candidate := filepath.Join(dir, "stage", filepath.Clean(r.CandidateModule))
+	if m.CandidateWrapper != nil {
+		candidate, err = m.writeCandidateWrapper(dir, candidate)
+		if err != nil {
+			return Result{}, m.failBeforePublish(dir, &j, err)
+		}
 	}
 	if err = m.Rebuilder.Build(ctx, candidate); err != nil {
 		return Result{}, m.failBeforePublish(dir, &j, err)
@@ -309,6 +326,29 @@ func (m *Manager) Apply(ctx context.Context, r Request) (Result, error) {
 	}
 	_ = os.RemoveAll(filepath.Join(dir, "stage"))
 	return Result{ID: id, Changed: true, Phase: j.Phase}, nil
+}
+
+func (m *Manager) writeCandidateWrapper(dir, stagedModule string) (string, error) {
+	w := m.CandidateWrapper
+	if w == nil {
+		return stagedModule, nil
+	}
+	if !safeAbsolutePath(w.ExistingConfig) || !safeAbsolutePath(w.StableModule) || !safeAbsolutePath(stagedModule) {
+		return "", fmt.Errorf("candidate wrapper paths must be safe absolute paths")
+	}
+	path := filepath.Join(dir, "stage", "candidate-wrapper.nix")
+	contents := fmt.Sprintf(`{ ... }: {
+  disabledModules = [ %s ];
+  imports = [
+    (builtins.toPath %s)
+    (builtins.toPath %s)
+  ];
+}
+`, nixString(w.StableModule), nixString(w.ExistingConfig), nixString(stagedModule))
+	if err := writeAtomic(path, []byte(contents)); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // Recover must be called while holding the exclusive lock. It restores every
@@ -402,6 +442,25 @@ func (m *Manager) now() time.Time {
 }
 func safeRelative(p string) bool {
 	return p != "" && !filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.HasPrefix(p, ".."+string(filepath.Separator)) && p != ".."
+}
+
+func safeAbsolutePath(p string) bool {
+	return p != "" && filepath.IsAbs(p) && filepath.Clean(p) == p && utf8.ValidString(p) && !strings.ContainsAny(p, "\x00\r\n")
+}
+
+// nixString encodes the small, fixed set of path strings used by the wrapper.
+// In particular, `${` must not become interpolation when a home directory or
+// transaction path happens to contain it.
+func nixString(value string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		`"`, `\"`,
+		"\n", `\n`,
+		"\r", `\r`,
+		"\t", `\t`,
+		"${", `\${`,
+	)
+	return `"` + replacer.Replace(value) + `"`
 }
 func validateDeletes(deletes []string) error {
 	seen := map[string]struct{}{}

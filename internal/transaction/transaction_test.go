@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 type fakeRebuild struct {
 	build, sw, rb, cur                  int
+	candidate, candidateContents        string
 	failBuild, failSwitch, failRollback error
 	order                               *[]string
 }
@@ -23,8 +25,38 @@ func (f *fakeRebuild) CurrentGeneration(context.Context) (string, error) {
 }
 func (f *fakeRebuild) Build(_ context.Context, p string) error {
 	f.build++
+	f.candidate = p
+	if b, err := os.ReadFile(p); err == nil {
+		f.candidateContents = string(b)
+	}
 	*f.order = append(*f.order, "build:"+filepath.Base(p))
 	return f.failBuild
+}
+
+func TestCandidateWrapperImportsHostConfigAndStagedReplacement(t *testing.T) {
+	order := []string{}
+	r := &fakeRebuild{order: &order}
+	h := &fakeHealth{order: &order}
+	m := manager(t, r, h)
+	m.CandidateWrapper = &CandidateWrapper{
+		ExistingConfig: "/etc/nixos/configuration.nix",
+		StableModule:   filepath.Join(m.Root, "generated", "nixcp-module.nix"),
+	}
+	_, err := m.Apply(context.Background(), Request{Files: map[string][]byte{
+		"generated/nixcp-module.nix": []byte("candidate"),
+	}, CandidateModule: "generated/nixcp-module.nix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(r.candidate) != "candidate-wrapper.nix" {
+		t.Fatalf("build input = %q, want candidate wrapper", r.candidate)
+	}
+	contents := r.candidateContents
+	if !strings.Contains(contents, `disabledModules = [ "`+filepath.Join(m.Root, "generated", "nixcp-module.nix")+`" ];`) ||
+		!strings.Contains(contents, `(builtins.toPath "/etc/nixos/configuration.nix")`) ||
+		!strings.Contains(contents, `(builtins.toPath "`+filepath.Join(m.Root, "transactions", "tx", "stage", "generated", "nixcp-module.nix")+`")`) {
+		t.Fatalf("unexpected wrapper:\n%s", contents)
+	}
 }
 func (f *fakeRebuild) Switch(context.Context) error {
 	f.sw++

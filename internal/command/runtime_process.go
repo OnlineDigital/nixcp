@@ -11,7 +11,6 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
-	"github.com/nixcp/nixcp/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -58,7 +57,14 @@ func runtimeProjectSlug(project string) string {
 // keeps their names stable if the project directory is renamed. Unlinked
 // projects retain the safe directory-name fallback.
 func runtimeServiceSlug(runtime Runtime, project string) string {
-	snap, err := state.NewStore(runtime.StateHome).Load()
+	// StateHome is only a test override. In production the state lives under
+	// the current user's ~/.nixcp, so use the same store resolver as PHP/site
+	// commands rather than treating an empty StateHome as the working directory.
+	store, err := phpStore(runtime)
+	if err != nil {
+		return runtimeProjectSlug(project)
+	}
+	snap, err := store.Load()
 	if err != nil {
 		return runtimeProjectSlug(project)
 	}

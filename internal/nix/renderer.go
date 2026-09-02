@@ -37,11 +37,31 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	renderServices(&b, s.Config)
 	renderMariaDBAccounts(&b, s.Config, s.Sites)
 	renderPHP(&b, s.Config)
+	renderViteWebSocketMap(&b, s.Sites)
 	for _, site := range sortedSites(s.Sites) {
 		renderSite(&b, site, s.Config.Owner.Username, s.Config.Owner.Group, s.Config.PHP.Extensions)
 	}
 	b.WriteString("}\n")
 	return []byte(b.String()), nil
+}
+
+// renderViteWebSocketMap distinguishes the Vite HMR WebSocket from ordinary
+// requests to `/`. Nginx locations cannot match a query string, so the map
+// combines the Upgrade header with the required Vite token before the vhost
+// internally redirects the matching request to its local Vite server.
+func renderViteWebSocketMap(b *strings.Builder, sites []state.SiteConfig) {
+	for _, site := range sites {
+		if site.Vite == nil {
+			continue
+		}
+		b.WriteString("  services.nginx.commonHttpConfig = ''\n")
+		b.WriteString("    map \"$http_upgrade:$arg_token\" $nixcp_vite_websocket {\n")
+		b.WriteString("      default 0;\n")
+		b.WriteString("      ~*^websocket:.+ 1;\n")
+		b.WriteString("    }\n")
+		b.WriteString("  '';\n")
+		return
+	}
 }
 
 func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
@@ -198,10 +218,14 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, ext
 	if s.Nginx.Handler.Type == "generic" {
 		content = "try_files $uri $uri/ =404;"
 	}
+	if s.Vite != nil {
+		content = "error_page 418 = @nixcp-vite-websocket; if ($nixcp_vite_websocket) { return 418; } " + content
+	}
 	fmt.Fprintf(b, "    locations.\"/\".extraConfig = %s;\n", nixString(content))
 	if s.Vite != nil {
 		vite := fmt.Sprintf("proxy_pass http://127.0.0.1:%d; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"Upgrade\"; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme;", s.Vite.Port)
 		fmt.Fprintf(b, "    locations.\"~ ^/(@vite|resources|node_modules|@react-refresh)(/|$)\".extraConfig = %s;\n", nixString(vite))
+		fmt.Fprintf(b, "    locations.\"@nixcp-vite-websocket\".extraConfig = %s;\n", nixString(vite))
 	}
 	// Keep the Nix package interpolation intentional: nixString escapes `${…}`
 	// in dynamic text, but Nginx must receive the resolved store path rather

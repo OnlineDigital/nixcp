@@ -143,7 +143,7 @@ func TestEnableVitePersistsPortAndNginxProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"locations.\"~ ^/(@vite|resources|node_modules|@react-refresh)(/|$)\"", "proxy_pass http://127.0.0.1:" + fmt.Sprint(port), "proxy_set_header Upgrade $http_upgrade", "try_files $uri $uri/ /index.php?$query_string"} {
+	for _, want := range []string{"map \"$http_upgrade:$arg_token\" $nixcp_vite_websocket", "~*^websocket:.+ 1", "locations.\"~ ^/(@vite|resources|node_modules|@react-refresh)(/|$)\"", "locations.\"@nixcp-vite-websocket\"", "error_page 418 = @nixcp-vite-websocket", "proxy_pass http://127.0.0.1:" + fmt.Sprint(port), "proxy_set_header Upgrade $http_upgrade", "try_files $uri $uri/ /index.php?$query_string"} {
 		if !strings.Contains(string(module), want) {
 			t.Fatalf("generated module missing %q:\n%s", want, module)
 		}

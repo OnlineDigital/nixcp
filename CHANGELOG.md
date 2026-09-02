@@ -7,6 +7,23 @@ and generated-module marker compatibility are part of the release contract.
 
 ### Added
 
+- Laravel runtime controls: `ncp enable schedule` manages a marked,
+  per-minute crontab entry for `ncp php artisan schedule:run`; `ncp enable`
+  and `ncp disable` manage user-systemd units in
+  `~/.config/systemd/user/` for `queue`, `horizon`, `vite`, `reverb`, and
+  `octane`, and `pulse`. Units use the invoking Laravel project's working
+  directory, are enabled and started immediately, and retain every supplied
+  tool argument; Pulse runs `artisan pulse:check`. `ncp restart` now restarts
+  those user units and the
+  `php`, `mariadb`, `valkey`, and `nginx` system targets. Reverb/Octane do not
+  alter Nginx configuration.
+- Pass-through shortcuts: `ncp c <script> [args...]` runs `ncp composer run
+  <script> [args...]`, and `ncp pint [flags...]` runs the project's
+  `php ./vendor/bin/pint [flags...]`.
+- Human `ncp artisan` and `ncp php` now directly proxy child terminal streams,
+  preserving normal output, errors, TTY interaction, and the child's exit
+  code without a redundant NixCP wrapper after ordinary child failures. JSON
+  mode remains captured and emits its structured process diagnostics.
 - Interactive panel (`ncp tui`): a bubbletea-based tabbed interface with five
   tabs — Status (overview + drift), Sites (list, link form, health probe,
   unlink), PHP (installed versions, install/uninstall/use-global, curated

@@ -172,3 +172,27 @@ func TestAliasesPropagateChildExitCode(t *testing.T) {
 		t.Fatalf("expected artisan's own exit code 5, got %d", code)
 	}
 }
+
+func TestComposerRunAndPintAliasesForwardArgs(t *testing.T) {
+	_, _, home := phpTestApp(t)
+	runner := &execx.FakeRunner{}
+	app, err := New(nil, WithStateHome(home), WithRunner(runner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"c", "dev", "--watch"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("composer alias exit %d", code)
+	}
+	if len(runner.Runs) != 1 || !strings.HasSuffix(strings.Join(runner.Runs[0].Args, " "), " run dev --watch") {
+		t.Fatalf("composer argv: %#v", runner.Runs)
+	}
+	runner.Runs = nil
+	app.Root.SetArgs([]string{"pint", "--parallel"})
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("pint alias exit %d", code)
+	}
+	if len(runner.Runs) != 1 || strings.Join(runner.Runs[0].Args, " ") != "./vendor/bin/pint --parallel" {
+		t.Fatalf("pint argv: %#v", runner.Runs)
+	}
+}

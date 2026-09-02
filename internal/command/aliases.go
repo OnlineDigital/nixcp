@@ -33,6 +33,20 @@ func newArtisanAliasCommand(runtime Runtime, name, short string, prefix []string
 }
 
 // newComposerAliasCommand builds a pass-through alias for `ncp composer`.
+// newPHPVendorAliasCommand builds a direct PHP proxy shortcut for a fixed
+// project-local executable under vendor/bin (for example Laravel Pint).
+func newPHPVendorAliasCommand(runtime Runtime, name, executable, short string) *cobra.Command {
+	return &cobra.Command{
+		Use:                name + " [args...]",
+		Short:              short,
+		Long:               "Shortcut for `ncp php " + executable + "`. Any extra arguments or flags are forwarded unchanged.",
+		Example:            "  ncp " + name + " --parallel",
+		Args:               cobra.ArbitraryArgs,
+		DisableFlagParsing: true,
+		RunE:               runAsAlias(func(c *cobra.Command, a []string) error { return runPHP(c, runtime, a) }, []string{executable}),
+	}
+}
+
 func newComposerAliasCommand(runtime Runtime, name, short string, prefix []string) *cobra.Command {
 	return &cobra.Command{
 		Use:                name + " [args...]",

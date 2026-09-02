@@ -102,6 +102,13 @@ ncp a make:model Post --migration     # ncp artisan make:model Post --migration
 ncp am --seed                         # ncp artisan migrate --seed
 ncp tinker                            # ncp artisan tinker
 ncp ci --prefer-dist                  # ncp composer install --prefer-dist
+ncp c dev                             # ncp composer run dev
+ncp pint --parallel                   # ncp php ./vendor/bin/pint --parallel
+
+# Run background Laravel processes from this project's directory.
+ncp enable schedule
+ncp enable queue --tries=3
+ncp enable reverb --host=127.0.0.1 --port=6001
 ```
 
 To create a dedicated local MariaDB database at link time, first run
@@ -124,11 +131,13 @@ All scriptable commands support `--json`; it emits exactly one JSON object on
 stdout and implies `--no-input`. Persisted changes are idempotent; a no-op
 reports `changed:false` and does not rebuild.
 
-The `a`, `am`, `tinker`, and `ci` commands are pass-through shortcuts:
-`ncp a <args…>` runs `ncp artisan <args…>`, `ncp am [flags…]` runs
+The `a`, `am`, `tinker`, `ci`, `c`, and `pint` commands are pass-through
+shortcuts: `ncp a <args…>` runs `ncp artisan <args…>`, `ncp am [flags…]` runs
 `ncp artisan migrate [flags…]`, `ncp tinker [args…]` runs
-`ncp artisan tinker [args…]`, and `ncp ci [flags…]` runs
-`ncp composer install [flags…]`. Anything appended after the shortcut —
+`ncp artisan tinker [args…]`, `ncp ci [flags…]` runs
+`ncp composer install [flags…]`, `ncp c <script> [args…]` runs
+`ncp composer run <script> [args…]`, and `ncp pint [flags…]` runs
+`ncp php ./vendor/bin/pint [flags…]`. Anything appended after the shortcut —
 arguments or flags — is forwarded to the wrapped tool unchanged, and NixCP's
 own global flags (`--json`, `--timeout`, …) are consumed before the call, never
 leaked into the child argv.
@@ -145,6 +154,16 @@ in the same YAML desired state. It refuses to start on non-TTY stdio
 (`tui_requires_tty`), and running bare `ncp` in an interactive terminal
 opens the panel while piped/script invocations keep printing the version
 banner.
+
+`ncp enable` and `ncp disable` manage per-project Laravel runtime processes.
+`enable schedule` installs NixCP's managed per-minute cron entry for
+`php artisan schedule:run`; `queue`, `horizon`, `vite`, `reverb`, `octane`,
+and `pulse` install user systemd units in `~/.config/systemd/user/`, enable them at login,
+and start them immediately. Every user-systemd target accepts and preserves
+appended tool arguments; Pulse runs `ncp php artisan pulse:check`. Use
+`ncp restart queue|horizon|vite|reverb|octane|pulse` for user services, or
+`ncp restart php|mariadb|valkey|nginx` for the matching
+system service. NixCP does not configure Nginx for Reverb or Octane.
 
 ## Security and limitations
 

@@ -23,13 +23,14 @@ var databasePasswordPattern = regexp.MustCompile(`^[A-Za-z0-9]{16,64}$`)
 
 // ConfigSnapshot is config.yaml. Empty strings encode YAML null for nullable fields.
 type ConfigSnapshot struct {
-	SchemaVersion   int             `yaml:"schemaVersion"`
-	Owner           Owner           `yaml:"owner"`
-	Platform        Platform        `yaml:"platform"`
-	Rebuild         RebuildConfig   `yaml:"rebuild"`
-	Services        ServiceStates   `yaml:"services"`
-	PHP             PHPConfig       `yaml:"php"`
-	MariaDBRegistry MariaDBRegistry `yaml:"mariadbRegistry,omitempty"`
+	SchemaVersion   int                 `yaml:"schemaVersion"`
+	Owner           Owner               `yaml:"owner"`
+	Platform        Platform            `yaml:"platform"`
+	Rebuild         RebuildConfig       `yaml:"rebuild"`
+	Services        ServiceStates       `yaml:"services"`
+	PHP             PHPConfig           `yaml:"php"`
+	MariaDBRegistry MariaDBRegistry     `yaml:"mariadbRegistry,omitempty"`
+	Aliases         map[string][]string `yaml:"aliases,omitempty"`
 }
 
 type Owner struct {
@@ -122,13 +123,14 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		GlobalDefault *string  `yaml:"globalDefault"`
 	}
 	type configYAML struct {
-		SchemaVersion   int             `yaml:"schemaVersion"`
-		Owner           Owner           `yaml:"owner"`
-		Platform        Platform        `yaml:"platform"`
-		Rebuild         rebuildYAML     `yaml:"rebuild"`
-		Services        ServiceStates   `yaml:"services"`
-		PHP             phpYAML         `yaml:"php"`
-		MariaDBRegistry MariaDBRegistry `yaml:"mariadbRegistry,omitempty"`
+		SchemaVersion   int                 `yaml:"schemaVersion"`
+		Owner           Owner               `yaml:"owner"`
+		Platform        Platform            `yaml:"platform"`
+		Rebuild         rebuildYAML         `yaml:"rebuild"`
+		Services        ServiceStates       `yaml:"services"`
+		PHP             phpYAML             `yaml:"php"`
+		MariaDBRegistry MariaDBRegistry     `yaml:"mariadbRegistry,omitempty"`
+		Aliases         map[string][]string `yaml:"aliases,omitempty"`
 	}
 	var target, globalDefault *string
 	if cfg.Rebuild.Target != "" {
@@ -139,7 +141,7 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		value := cfg.PHP.GlobalDefault
 		globalDefault = &value
 	}
-	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}, cfg.MariaDBRegistry}, nil
+	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}, cfg.MariaDBRegistry, cfg.Aliases}, nil
 }
 
 func (cfg *ConfigSnapshot) Canonicalize() {
@@ -155,6 +157,9 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 		cfg.Rebuild.Mode = rebuildModeTraditional
 	}
 	cfg.Rebuild.Target = strings.TrimSpace(cfg.Rebuild.Target)
+	if len(cfg.Aliases) == 0 {
+		cfg.Aliases = nil
+	}
 	for _, s := range []*ServiceConfig{&cfg.Services.Nginx, &cfg.Services.MariaDB, &cfg.Services.Valkey} {
 		s.DesiredState = strings.ToLower(strings.TrimSpace(s.DesiredState))
 	}

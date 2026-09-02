@@ -233,16 +233,22 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.AddCommand(newStatusCommand(runtime))
 	root.AddCommand(newDoctorCommand(runtime))
 	root.AddCommand(newServiceCommand(runtime))
+	root.AddCommand(newEnableCommand(runtime))
+	root.AddCommand(newDisableCommand(runtime))
+	root.AddCommand(newRestartCommand(runtime))
 	root.AddCommand(newServiceAliasCommand(runtime, service.Nginx))
 	root.AddCommand(newServiceAliasCommand(runtime, service.MariaDB))
 	root.AddCommand(newServiceAliasCommand(runtime, service.Valkey))
 	root.AddCommand(newPHPCommand(runtime))
 	root.AddCommand(newArtisanCommand(runtime))
-	root.AddCommand(newArtisanAliasCommand(runtime, "a", "artisan shortcut", nil))
-	root.AddCommand(newArtisanAliasCommand(runtime, "am", "artisan migrate shortcut", []string{"migrate"}))
-	root.AddCommand(newArtisanAliasCommand(runtime, "tinker", "artisan tinker shortcut", []string{"tinker"}))
 	root.AddCommand(newComposerCommand(runtime))
-	root.AddCommand(newComposerAliasCommand(runtime, "ci", "composer install shortcut", []string{"install"}))
+	root.AddCommand(newAliasCommand(runtime))
+	// Default aliases are persisted to ~/.nixcp/config.yaml by install. These
+	// command registrations execute their matching persisted target; install
+	// also backfills this section for existing state.
+	for name, target := range configuredAliases(runtime) {
+		root.AddCommand(newConfiguredAliasCommand(runtime, name, target))
+	}
 	root.AddCommand(newLinkCommand(runtime))
 	root.AddCommand(newUnlinkCommand(runtime))
 	root.AddCommand(newSitesCommand(runtime))
@@ -326,10 +332,11 @@ func (a *ApplicationRoot) Execute() int {
 			payload := output.Error(commandName, appErr.Code, appErr.Message, appErr.Hint, appErr.CauseAsWarnings())
 			_ = output.WriteJSON(a.Root.OutOrStdout(), payload)
 		}
-	} else {
+	} else if appErr.ProcessExit == nil || !appErr.ProcessExit.Live || appErr.ProcessExit.Signal != "" {
 		// Cobra errors are intentionally silenced so NixCP can keep a stable
-		// JSON envelope. The human-facing path must still surface the typed
-		// error, otherwise users receive only an opaque exit code.
+		// JSON envelope. The human-facing path must still surface typed NixCP
+		// errors, but live child failures have already printed their own output.
+		// Signals still receive a NixCP diagnostic because the child may not.
 		writeHumanError(a.Root.ErrOrStderr(), appErr)
 	}
 

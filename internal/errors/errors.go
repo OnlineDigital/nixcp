@@ -47,6 +47,9 @@ type ProcessExit struct {
 	Command  string
 	Stderr   string
 	Signal   string
+	// Live reports that the child already wrote directly to the user's
+	// terminal. It lets the human renderer avoid duplicating its failure.
+	Live bool
 }
 
 // WithProcessExit attaches process passthrough metadata to the error.

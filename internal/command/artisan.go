@@ -47,13 +47,17 @@ func runArtisan(cmd *cobra.Command, runtime Runtime, args []string) error {
 	if err != nil {
 		return apperrors.New("no_active_php_version", err.Error(), "Run: ncp php use <version>", apperrors.ExitCodePrecond)
 	}
-	// tinker is artisan's interactive REPL: attach the real TTY so the
-	// user gets a prompt instead of a closed stdin.
-	interactive := len(args) > 0 && args[0] == "tinker"
+	// Human-mode Artisan is a direct terminal proxy, not a buffered wrapper.
+	// JSON is deliberately captured to preserve its structured envelope.
+	interactive := !commandJSON(cmd)
 	argv := append([]string{"./artisan"}, args...)
-	res, err := runtime.Runner.Run(cmd.Context(), &execx.Command{Name: php.Binary(v), Args: argv, Dir: cwd, Env: phpEnv(os.Environ(), v), Interactive: interactive})
+	child := &execx.Command{Name: php.Binary(v), Args: argv, Dir: cwd, Env: phpEnv(os.Environ(), v), Interactive: interactive}
+	if interactive {
+		child.Stdin, child.Stdout, child.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	}
+	res, err := runtime.Runner.Run(cmd.Context(), child)
 	if err != nil || res.ExitCode != 0 {
-		return processFailure("artisan_execution_failed", "Artisan", argv, res, err, apperrors.ExitCodeRuntime)
+		return processFailure("artisan_execution_failed", "Artisan", argv, res, err, apperrors.ExitCodeRuntime, interactive)
 	}
 	return nil
 }

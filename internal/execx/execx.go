@@ -29,10 +29,16 @@ type Result struct {
 
 // Command describes a controlled argv-based command execution.
 type Command struct {
-	Name      string
-	Args      []string
-	Dir       string
-	Env       []string
+	Name string
+	Args []string
+	Dir  string
+	Env  []string
+	// Stdin, Stdout, and Stderr optionally override the host streams when
+	// Interactive is set. Callers normally supply their Cobra streams so
+	// passthrough output also works when the CLI is embedded or redirected.
+	Stdin     io.Reader
+	Stdout    io.Writer
+	Stderr    io.Writer
 	StdoutMax int
 	StderrMax int
 	// Interactive attaches the process to the caller's terminal: stdin,
@@ -100,9 +106,18 @@ func (r *RealRunner) Run(ctx context.Context, cmd *Command) (Result, error) {
 		// tools (artisan tinker) behave exactly as if invoked directly.
 		// Signals reach it through the process group; its exit code is
 		// propagated verbatim via ProcessExitError.
-		execCmd.Stdin = os.Stdin
-		execCmd.Stdout = os.Stdout
-		execCmd.Stderr = os.Stderr
+		execCmd.Stdin = cmd.Stdin
+		if execCmd.Stdin == nil {
+			execCmd.Stdin = os.Stdin
+		}
+		execCmd.Stdout = cmd.Stdout
+		if execCmd.Stdout == nil {
+			execCmd.Stdout = os.Stdout
+		}
+		execCmd.Stderr = cmd.Stderr
+		if execCmd.Stderr == nil {
+			execCmd.Stderr = os.Stderr
+		}
 		runErr := execCmd.Run()
 		res := Result{Cmd: append([]string{cmd.Name}, cmd.Args...), ExitCode: exitCodeFromError(runErr), DurationMs: time.Since(started).Milliseconds()}
 		if ctx.Err() == context.DeadlineExceeded {

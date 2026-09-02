@@ -358,11 +358,18 @@ func runPHP(cmd *cobra.Command, runtime Runtime, args []string) error {
 	if err != nil {
 		return apperrors.New("no_active_php_version", err.Error(), "Run: ncp php use <version>", apperrors.ExitCodePrecond)
 	}
-	interactive := len(args) > 0 && (args[0] == "-a" || args[0] == "--interactive")
+	// In human mode PHP is a direct proxy: it inherits the terminal so normal
+	// output, errors, prompts, colours, and progress stay indistinguishable
+	// from invoking PHP itself. JSON remains captured for its one-object
+	// envelope contract.
+	interactive := !commandJSON(cmd)
 	c := &execx.Command{Name: php.Binary(v), Args: args, Dir: cwd, Env: phpEnv(os.Environ(), v), Interactive: interactive}
+	if interactive {
+		c.Stdin, c.Stdout, c.Stderr = cmd.InOrStdin(), cmd.OutOrStdout(), cmd.ErrOrStderr()
+	}
 	res, e := runtime.Runner.Run(cmd.Context(), c)
 	if e != nil || res.ExitCode != 0 {
-		return processFailure("php_execution_failed", "PHP", append([]string{php.Binary(v)}, args...), res, e, apperrors.ExitCodeRuntime)
+		return processFailure("php_execution_failed", "PHP", append([]string{php.Binary(v)}, args...), res, e, apperrors.ExitCodeRuntime, interactive)
 	}
 	return nil
 }
@@ -370,8 +377,8 @@ func runPHP(cmd *cobra.Command, runtime Runtime, args []string) error {
 // processFailure wraps a child-process failure as a stable AppError while
 // propagating the child's own exit code (and signal, when applicable) so
 // `ncp php`/`ncp artisan` behave like the wrapped tool in scripts.
-func processFailure(code, label string, argv []string, res execx.Result, runErr error, fallback apperrors.ExitCode) error {
-	pe := apperrors.ProcessExit{ExitCode: res.ExitCode, Command: strings.Join(argv, " "), Stderr: strings.TrimSpace(res.Stderr)}
+func processFailure(code, label string, argv []string, res execx.Result, runErr error, fallback apperrors.ExitCode, live ...bool) error {
+	pe := apperrors.ProcessExit{ExitCode: res.ExitCode, Command: strings.Join(argv, " "), Stderr: strings.TrimSpace(res.Stderr), Live: len(live) > 0 && live[0]}
 	var pex *execx.ProcessExitError
 	if errors.As(runErr, &pex) {
 		pe.ExitCode = pex.ExitCode

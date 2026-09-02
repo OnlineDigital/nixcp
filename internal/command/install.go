@@ -64,6 +64,12 @@ func newInstallCommand(runtime Runtime) *cobra.Command {
 		if err != nil {
 			return apperrors.New("invalid_state", err.Error(), "", apperrors.ExitCodePrecond)
 		}
+		if mergeDefaultAliases(&snap.Config) {
+			if err := store.WriteSnapshot(snap); err != nil {
+				return apperrors.New("state_write_failed", err.Error(), "", apperrors.ExitCodeRuntime)
+			}
+			changed = true
+		}
 		if err := installStaticArtifacts(store); err != nil {
 			return apperrors.New("state_write_failed", err.Error(), "", apperrors.ExitCodeRuntime)
 		}
@@ -115,11 +121,25 @@ func newInstallCommand(runtime Runtime) *cobra.Command {
 }
 
 func initialConfig(u *user.User, uid, gid int, group, flake string, impure bool) state.ConfigSnapshot {
-	cfg := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: u.Username, UID: uid, GID: gid, Group: group, Home: u.HomeDir}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}}
+	cfg := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: u.Username, UID: uid, GID: gid, Group: group, Home: u.HomeDir}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}, Aliases: defaultAliases()}
 	if flake != "" {
 		cfg.Rebuild.Mode, cfg.Rebuild.Target, cfg.Rebuild.Impure = "flake", flake, impure
 	}
 	return cfg
+}
+
+func mergeDefaultAliases(cfg *state.ConfigSnapshot) bool {
+	if cfg.Aliases == nil {
+		cfg.Aliases = make(map[string][]string)
+	}
+	changed := false
+	for name, target := range defaultAliases() {
+		if _, exists := cfg.Aliases[name]; !exists {
+			cfg.Aliases[name] = append([]string(nil), target...)
+			changed = true
+		}
+	}
+	return changed
 }
 
 func installStaticArtifacts(store *state.Store) error {

@@ -38,7 +38,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	renderMariaDBAccounts(&b, s.Config, s.Sites)
 	renderPHP(&b, s.Config)
 	for _, site := range sortedSites(s.Sites) {
-		renderSite(&b, site, s.Config.Owner.Username, s.Config.Owner.Group)
+		renderSite(&b, site, s.Config.Owner.Username, s.Config.Owner.Group, s.Config.PHP.Extensions)
 	}
 	b.WriteString("}\n")
 	return []byte(b.String()), nil
@@ -154,18 +154,24 @@ func renderPHP(b *strings.Builder, c state.ConfigSnapshot) {
 		if !ok {
 			continue
 		}
-		exts := make([]string, 0, len(c.PHP.Extensions))
-		for _, ext := range c.PHP.Extensions {
-			if attr, compatible := php.Compatible(v, ext); compatible {
-				exts = append(exts, "all."+attr)
-			}
-		}
 		// PHP CLI and FPM consumers share this single nixpkgs composition.
-		fmt.Fprintf(b, "  environment.etc.%s.source = \"${(pkgs.%s.withExtensions ({ enabled, all }: enabled ++ [ %s ]))}/bin/php\";\n", nixString("nixcp/php/"+v+"/bin/php"), entry.Nixpkgs, strings.Join(exts, " "))
+		fmt.Fprintf(b, "  environment.etc.%s.source = \"${(%s)}/bin/php\";\n", nixString("nixcp/php/"+v+"/bin/php"), phpPackageExpression(v, entry, c.PHP.Extensions))
 	}
 }
 
-func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string) {
+// phpPackageExpression is shared by the CLI wrapper and PHP-FPM pools so a
+// module visible in `ncp php -m` is also loaded by requests served by a site.
+func phpPackageExpression(version string, entry php.Version, extensions []string) string {
+	extensionsAttrs := make([]string, 0, len(extensions))
+	for _, extension := range extensions {
+		if attr, compatible := php.Compatible(version, extension); compatible {
+			extensionsAttrs = append(extensionsAttrs, "all."+attr)
+		}
+	}
+	return fmt.Sprintf("pkgs.%s.withExtensions ({ enabled, all }: enabled ++ [ %s ])", entry.Nixpkgs, strings.Join(extensionsAttrs, " "))
+}
+
+func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, extensions []string) {
 	if !s.Enabled {
 		return
 	}
@@ -180,7 +186,7 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string) {
 	// allowing the pool to grow unbounded. `ondemand` cannot meet that minimum:
 	// it always begins with zero workers. Recycling at 200 requests bounds
 	// long-lived worker memory in development.
-	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = pkgs.%s; settings = { \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(group), entry.Nixpkgs)
+	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = %s; settings = { \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(group), phpPackageExpression(s.PHP, entry, extensions))
 	fmt.Fprintf(b, "  services.nginx.virtualHosts.%s = {\n", nixString(s.Domain))
 	b.WriteString("    listen = [{ addr = \"0.0.0.0\"; port = 80; }];\n")
 	fmt.Fprintf(b, "    root = %s;\n", nixString(s.DocumentRoot))

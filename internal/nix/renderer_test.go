@@ -55,6 +55,28 @@ func TestRenderPHP85SkipsUnavailableOpcacheAttribute(t *testing.T) {
 	}
 }
 
+func TestRenderSiteFPMUsesConfiguredExtensions(t *testing.T) {
+	path := t.TempDir()
+	c := state.ConfigSnapshot{
+		SchemaVersion: 2,
+		Owner:         state.Owner{Username: "u", Group: "g", Home: "/tmp/u"},
+		Platform:      state.Platform{System: "x86_64-linux"},
+		Rebuild:       state.RebuildConfig{Mode: "traditional"},
+		Services:      state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}},
+		PHP:           state.PHPConfig{Installed: []string{"8.4"}, Extensions: []string{"redis", "imagick"}},
+	}
+	s := state.Snapshot{Config: c, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "example", Enabled: true, Domain: "example.test", ProjectPath: path, DocumentRoot: path, PHP: "8.4", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}}}}
+	b, err := (Renderer{}).Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := string(b)
+	want := "phpPackage = pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ all.imagick all.redis ])"
+	if !strings.Contains(pool, want) {
+		t.Fatalf("FPM pool must use the PHP extension composition visible to the CLI; missing %q:\n%s", want, pool)
+	}
+}
+
 func TestRenderComposerExposesPHPEntrypoint(t *testing.T) {
 	c := state.ConfigSnapshot{
 		SchemaVersion: 2,

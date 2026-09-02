@@ -18,7 +18,7 @@
   environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/share/php/composer/bin/composer";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
   environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
-  services.phpfpm.pools."nixcp-example-test" = { user = "nixcp"; group = "users"; phpPackage = pkgs.php84; settings = { "listen.owner" = "nginx"; "listen.group" = "nginx"; "listen.mode" = "0660"; pm = "dynamic"; "pm.max_children" = 4; "pm.start_servers" = 2; "pm.min_spare_servers" = 2; "pm.max_spare_servers" = 2; "pm.max_requests" = 200; }; };
+  services.phpfpm.pools."nixcp-example-test" = { user = "nixcp"; group = "users"; phpPackage = pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]); settings = { "listen.owner" = "nginx"; "listen.group" = "nginx"; "listen.mode" = "0660"; pm = "dynamic"; "pm.max_children" = 4; "pm.start_servers" = 2; "pm.min_spare_servers" = 2; "pm.max_spare_servers" = 2; "pm.max_requests" = 200; }; };
   services.nginx.virtualHosts."example.test" = {
     listen = [{ addr = "0.0.0.0"; port = 80; }];
     root = "/home";

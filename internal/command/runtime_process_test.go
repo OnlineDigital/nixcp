@@ -45,7 +45,7 @@ func TestEnableQueueViteAndPulseForwardFlags(t *testing.T) {
 	for _, target := range []struct{ name, want string }{
 		{"queue", `"queue:work" "--tries=3"`},
 		{"horizon", `"horizon" "--balance=auto"`},
-		{"vite", `"npm" "run" "dev" "--host"`},
+		{"vite", `"run" "dev" "--host"`},
 		{"pulse", `"pulse:check" "--no-interaction"`},
 	} {
 		t.Run(target.name, func(t *testing.T) {
@@ -97,7 +97,8 @@ func TestEnableReverbWritesUserUnitAndForwardsFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(unit)
-	if !strings.Contains(text, "WorkingDirectory="+systemdPath(project)) || !strings.Contains(text, `ExecStart="ncp" "php" "artisan" "reverb:start" "--host=0.0.0.0" "--port" "6001"`) {
+	wantExec := "ExecStart=" + systemdArgs([]string{runtimeNCPBinary(), "php", "artisan", "reverb:start", "--host=0.0.0.0", "--port", "6001"})
+	if !strings.Contains(text, "WorkingDirectory="+systemdPath(project)) || !strings.Contains(text, "Environment=PATH="+systemdPath(runtimePath())) || !strings.Contains(text, wantExec) {
 		t.Fatalf("bad unit:\n%s", text)
 	}
 	if len(runner.Runs) != 2 || strings.Join(runner.Runs[0].Args, " ") != "--user daemon-reload" || strings.Join(runner.Runs[1].Args, " ") != "--user enable --now "+unitName {
@@ -183,7 +184,8 @@ func TestEnableScheduleInstallsManagedCronEntry(t *testing.T) {
 	if len(runner.Runs) != 2 || runner.Runs[1].Name != "crontab" {
 		t.Fatalf("runs: %#v", runner.Runs)
 	}
-	if !strings.Contains(installed, "* * * * * cd '"+project+"' && ncp php artisan schedule:run >/dev/null 2>&1") {
+	want := "* * * * * PATH=" + shellQuote(runtimePath()) + "; export PATH; cd '" + project + "' && " + shellQuote(runtimeNCPBinary()) + " php artisan schedule:run >/dev/null 2>&1"
+	if !strings.Contains(installed, want) {
 		t.Fatalf("bad cron: %s", installed)
 	}
 }

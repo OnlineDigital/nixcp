@@ -3,6 +3,7 @@ package command
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"path/filepath"
 	"regexp"
@@ -220,14 +221,14 @@ func runtimeSystemctl(cmd *cobra.Command, runtime Runtime, args ...string) error
 }
 
 func renderRuntimeUnit(target runtimeTarget, project string, flags []string) string {
-	argv := []string{"ncp", "php", "artisan"}
+	argv := []string{runtimeNCPBinary(), "php", "artisan"}
 	switch target {
 	case runtimeQueue:
 		argv = append(argv, "queue:work")
 	case runtimeHorizon:
 		argv = append(argv, "horizon")
 	case runtimeVite:
-		argv = []string{"npm", "run", "dev"}
+		argv = []string{runtimeNPMBinary(), "run", "dev"}
 	case runtimeReverb:
 		argv = append(argv, "reverb:start")
 	case runtimeOctane:
@@ -238,8 +239,41 @@ func renderRuntimeUnit(target runtimeTarget, project string, flags []string) str
 	// Every user-systemd runtime accepts its tool's native argv. The cron
 	// scheduler remains intentionally fixed.
 	argv = append(argv, flags...)
-	return "[Unit]\nDescription=NixCP Laravel " + string(target) + "\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=" + systemdPath(project) + "\nExecStart=" + systemdArgs(argv) + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
+	return "[Unit]\nDescription=NixCP Laravel " + string(target) + "\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=" + systemdPath(project) + "\nEnvironment=PATH=" + systemdPath(runtimePath()) + "\nExecStart=" + systemdArgs(argv) + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
 }
+
+// User systemd and cron run with a deliberately sparse environment and do not
+// load the interactive shell's Nix profile. Resolve NixCP/npm from the current
+// profile explicitly and provide that profile in PATH for child tools.
+func runtimeProfileBin() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".nix-profile", "bin")
+}
+
+func runtimePath() string {
+	profile := runtimeProfileBin()
+	if profile == "" {
+		return os.Getenv("PATH")
+	}
+	return profile + ":" + os.Getenv("PATH")
+}
+
+func runtimeBinary(name string) string {
+	profileBinary := filepath.Join(runtimeProfileBin(), name)
+	if _, err := os.Stat(profileBinary); err == nil {
+		return profileBinary
+	}
+	if found, err := exec.LookPath(name); err == nil {
+		return found
+	}
+	return name
+}
+
+func runtimeNCPBinary() string { return runtimeBinary("ncp") }
+func runtimeNPMBinary() string { return runtimeBinary("npm") }
 
 func systemdArgs(args []string) string {
 	out := make([]string, len(args))
@@ -274,7 +308,7 @@ func updateSchedule(cmd *cobra.Command, runtime Runtime, project string, enabled
 	}
 	current = removeScheduleBlock(current)
 	if enabled {
-		current = strings.TrimRight(current, "\n") + "\n" + scheduleBegin + "\n* * * * * cd " + shellQuote(project) + " && ncp php artisan schedule:run >/dev/null 2>&1\n" + scheduleEnd + "\n"
+		current = strings.TrimRight(current, "\n") + "\n" + scheduleBegin + "\n* * * * * PATH=" + shellQuote(runtimePath()) + "; export PATH; cd " + shellQuote(project) + " && " + shellQuote(runtimeNCPBinary()) + " php artisan schedule:run >/dev/null 2>&1\n" + scheduleEnd + "\n"
 	}
 	file, err := os.CreateTemp("", "nixcp-crontab-")
 	if err != nil {

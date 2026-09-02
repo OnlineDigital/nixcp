@@ -53,7 +53,7 @@ func TestEnableQueueViteAndPulseForwardFlags(t *testing.T) {
 			if _, err := execute(t, rt, "enable", target.name, flag); err != nil {
 				t.Fatal(err)
 			}
-			body, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "nixcp-"+target.name+".service"))
+			body, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", runtimeTarget(target.name).unit(runtimeProjectSlug(project))))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,22 +75,30 @@ func TestEnableReverbWritesUserUnitAndForwardsFlags(t *testing.T) {
 	if _, err := execute(t, rt, "enable", "reverb", "--host=0.0.0.0", "--port", "6001"); err != nil {
 		t.Fatal(err)
 	}
-	unit, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", "nixcp-reverb.service"))
+	unitName := runtimeReverb.unit(runtimeProjectSlug(project))
+	unit, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", unitName))
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(unit)
-	if !strings.Contains(text, "WorkingDirectory=\""+project+"\"") || !strings.Contains(text, `ExecStart="ncp" "php" "artisan" "reverb:start" "--host=0.0.0.0" "--port" "6001"`) {
+	if !strings.Contains(text, "WorkingDirectory="+systemdPath(project)) || !strings.Contains(text, `ExecStart="ncp" "php" "artisan" "reverb:start" "--host=0.0.0.0" "--port" "6001"`) {
 		t.Fatalf("bad unit:\n%s", text)
 	}
-	if len(runner.Runs) != 2 || strings.Join(runner.Runs[0].Args, " ") != "--user daemon-reload" || strings.Join(runner.Runs[1].Args, " ") != "--user enable --now nixcp-reverb.service" {
+	if len(runner.Runs) != 2 || strings.Join(runner.Runs[0].Args, " ") != "--user daemon-reload" || strings.Join(runner.Runs[1].Args, " ") != "--user enable --now "+unitName {
 		t.Fatalf("systemctl runs: %#v", runner.Runs)
 	}
 }
 
 func TestDisableQueueStopsDeletesAndReloads(t *testing.T) {
 	rt, runner, home := runtimeTest(t)
-	path := filepath.Join(home, ".config", "systemd", "user", "nixcp-queue.service")
+	project := t.TempDir()
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	unitName := runtimeQueue.unit(runtimeProjectSlug(project))
+	path := filepath.Join(home, ".config", "systemd", "user", unitName)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -103,17 +111,23 @@ func TestDisableQueueStopsDeletesAndReloads(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("unit remains: %v", err)
 	}
-	if len(runner.Runs) != 2 || strings.Join(runner.Runs[0].Args, " ") != "--user disable --now nixcp-queue.service" || strings.Join(runner.Runs[1].Args, " ") != "--user daemon-reload" {
+	if len(runner.Runs) != 2 || strings.Join(runner.Runs[0].Args, " ") != "--user disable --now "+unitName || strings.Join(runner.Runs[1].Args, " ") != "--user daemon-reload" {
 		t.Fatalf("runs: %#v", runner.Runs)
 	}
 }
 
 func TestRestartRoutesUserAndSystemTargets(t *testing.T) {
 	rt, runner, _ := runtimeTest(t)
+	project := t.TempDir()
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := execute(t, rt, "restart", "octane"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(runner.Runs[0].Args, " ") != "--user restart nixcp-octane.service" {
+	if strings.Join(runner.Runs[0].Args, " ") != "--user restart "+runtimeOctane.unit(runtimeProjectSlug(project)) {
 		t.Fatalf("user restart: %#v", runner.Runs[0])
 	}
 	runner.Runs = nil

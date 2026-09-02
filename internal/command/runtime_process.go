@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
@@ -33,8 +34,21 @@ func parseRuntimeTarget(raw string) (runtimeTarget, error) {
 	}
 }
 
-func (t runtimeTarget) unit() string {
-	return "nixcp-" + string(t) + ".service"
+func (t runtimeTarget) unit(slug string) string {
+	return "nixcp-" + slug + "-" + string(t) + ".service"
+}
+
+var runtimeSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
+
+// runtimeProjectSlug creates a stable systemd-safe project name. Runtime
+// processes are project-scoped, so their unit must be too: two Laravel sites
+// can safely run different queues, Vite servers, or Reverb instances.
+func runtimeProjectSlug(project string) string {
+	slug := strings.Trim(runtimeSlugChars.ReplaceAllString(strings.ToLower(filepath.Base(filepath.Clean(project))), "-"), "-")
+	if slug == "" {
+		return "project"
+	}
+	return slug
 }
 
 func newEnableCommand(runtime Runtime) *cobra.Command {
@@ -66,7 +80,11 @@ func newRestartCommand(runtime Runtime) *cobra.Command {
 			return apperrors.New("invalid_restart_arguments", "restart accepts exactly one target", "Choose queue, horizon, vite, reverb, octane, pulse, php, mariadb, valkey, or nginx", apperrors.ExitCodeUsage)
 		}
 		if target, err := parseRuntimeTarget(args[0]); err == nil && target != runtimeSchedule {
-			if err := runtimeSystemctl(c, runtime, "--user", "restart", target.unit()); err != nil {
+			project, projectErr := runtimeProjectDir()
+			if projectErr != nil {
+				return projectErr
+			}
+			if err := runtimeSystemctl(c, runtime, "--user", "restart", target.unit(runtimeProjectSlug(project))); err != nil {
 				return err
 			}
 			return emitRuntimeResult(c, "restart", target, true)
@@ -129,14 +147,15 @@ func enableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget, fl
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(home, ".config", "systemd", "user", target.unit())
+	unit := target.unit(runtimeProjectSlug(project))
+	path := filepath.Join(home, ".config", "systemd", "user", unit)
 	if err := writeGenerated(path, []byte(renderRuntimeUnit(target, project, flags))); err != nil {
 		return apperrors.New("runtime_unit_write_failed", err.Error(), "Check that your user systemd directory is writable", apperrors.ExitCodeRuntime)
 	}
 	if err := runtimeSystemctl(cmd, runtime, "--user", "daemon-reload"); err != nil {
 		return err
 	}
-	if err := runtimeSystemctl(cmd, runtime, "--user", "enable", "--now", target.unit()); err != nil {
+	if err := runtimeSystemctl(cmd, runtime, "--user", "enable", "--now", unit); err != nil {
 		return err
 	}
 	return emitRuntimeResult(cmd, "enable", target, true)
@@ -150,12 +169,17 @@ func disableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget) e
 	if err != nil {
 		return err
 	}
-	// Stop/disable before deleting the definition, so a running process cannot
-	// survive an otherwise successful removal.
-	if err := runtimeSystemctl(cmd, runtime, "--user", "disable", "--now", target.unit()); err != nil {
+	project, err := runtimeProjectDir()
+	if err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(home, ".config", "systemd", "user", target.unit())); err != nil && !os.IsNotExist(err) {
+	unit := target.unit(runtimeProjectSlug(project))
+	// Stop/disable before deleting the definition, so a running process cannot
+	// survive an otherwise successful removal.
+	if err := runtimeSystemctl(cmd, runtime, "--user", "disable", "--now", unit); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(home, ".config", "systemd", "user", unit)); err != nil && !os.IsNotExist(err) {
 		return apperrors.New("runtime_unit_remove_failed", err.Error(), "Check that your user systemd directory is writable", apperrors.ExitCodeRuntime)
 	}
 	if err := runtimeSystemctl(cmd, runtime, "--user", "daemon-reload"); err != nil {
@@ -195,7 +219,7 @@ func renderRuntimeUnit(target runtimeTarget, project string, flags []string) str
 	// Every user-systemd runtime accepts its tool's native argv. The cron
 	// scheduler remains intentionally fixed.
 	argv = append(argv, flags...)
-	return "[Unit]\nDescription=NixCP Laravel " + string(target) + "\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=" + systemdArg(project) + "\nExecStart=" + systemdArgs(argv) + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
+	return "[Unit]\nDescription=NixCP Laravel " + string(target) + "\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=" + systemdPath(project) + "\nExecStart=" + systemdArgs(argv) + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
 }
 
 func systemdArgs(args []string) string {
@@ -207,6 +231,13 @@ func systemdArgs(args []string) string {
 }
 func systemdArg(value string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), `"`, `\"`) + `"`
+}
+
+// WorkingDirectory is a systemd path setting, not an ExecStart argv field.
+// Quoting it produces an invalid path (including the quote characters); escape
+// the few characters systemd's unit parser treats specially instead.
+func systemdPath(value string) string {
+	return strings.NewReplacer(`\\`, `\\\\`, " ", `\\x20`, "\t", `\\x09`, "\n", `\\x0a`).Replace(value)
 }
 
 const scheduleBegin = "# BEGIN NIXCP SCHEDULE"

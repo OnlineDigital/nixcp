@@ -10,6 +10,7 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,24 @@ func runtimeProjectSlug(project string) string {
 	return slug
 }
 
+// runtimeServiceSlug uses the linked site's stable ID when the current
+// directory belongs to a site. This makes runtime units easy to identify and
+// keeps their names stable if the project directory is renamed. Unlinked
+// projects retain the safe directory-name fallback.
+func runtimeServiceSlug(runtime Runtime, project string) string {
+	snap, err := state.NewStore(runtime.StateHome).Load()
+	if err != nil {
+		return runtimeProjectSlug(project)
+	}
+	project = filepath.Clean(project)
+	for _, site := range snap.Sites {
+		if filepath.Clean(site.ProjectPath) == project {
+			return site.ID
+		}
+	}
+	return runtimeProjectSlug(project)
+}
+
 func newEnableCommand(runtime Runtime) *cobra.Command {
 	return runtimeCommand("enable <schedule|queue|horizon|vite|reverb|octane|pulse> [flags...]", "Enable a Laravel runtime process", func(c *cobra.Command, args []string) error {
 		target, err := parseRuntimeTarget(args[0])
@@ -84,7 +103,7 @@ func newRestartCommand(runtime Runtime) *cobra.Command {
 			if projectErr != nil {
 				return projectErr
 			}
-			if err := runtimeSystemctl(c, runtime, "--user", "restart", target.unit(runtimeProjectSlug(project))); err != nil {
+			if err := runtimeSystemctl(c, runtime, "--user", "restart", target.unit(runtimeServiceSlug(runtime, project))); err != nil {
 				return err
 			}
 			return emitRuntimeResult(c, "restart", target, true)
@@ -147,7 +166,7 @@ func enableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget, fl
 	if err != nil {
 		return err
 	}
-	unit := target.unit(runtimeProjectSlug(project))
+	unit := target.unit(runtimeServiceSlug(runtime, project))
 	path := filepath.Join(home, ".config", "systemd", "user", unit)
 	if err := writeGenerated(path, []byte(renderRuntimeUnit(target, project, flags))); err != nil {
 		return apperrors.New("runtime_unit_write_failed", err.Error(), "Check that your user systemd directory is writable", apperrors.ExitCodeRuntime)
@@ -173,7 +192,7 @@ func disableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget) e
 	if err != nil {
 		return err
 	}
-	unit := target.unit(runtimeProjectSlug(project))
+	unit := target.unit(runtimeServiceSlug(runtime, project))
 	// Stop/disable before deleting the definition, so a running process cannot
 	// survive an otherwise successful removal.
 	if err := runtimeSystemctl(cmd, runtime, "--user", "disable", "--now", unit); err != nil {

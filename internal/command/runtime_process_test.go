@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/state"
 )
 
 func runtimeTest(t *testing.T) (Runtime, *execx.FakeRunner, string) {
@@ -23,6 +24,21 @@ func runtimeTest(t *testing.T) (Runtime, *execx.FakeRunner, string) {
 	rt.StateHome = home
 	rt.Runner = runner
 	return rt, runner, home
+}
+
+func TestRuntimeServiceSlugUsesLinkedSiteID(t *testing.T) {
+	rt, _, home := runtimeTest(t)
+	project := t.TempDir()
+	store := state.NewStore(home)
+	config := testSiteConfig(home)
+	config.Services.Nginx.Installed = true
+	snap := state.Snapshot{Config: config, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "deals-p-ohost-cloud", Enabled: true, Domain: "deals.p.ohost.cloud", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}}}}
+	if err := store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	if got := runtimeServiceSlug(rt, project); got != "deals-p-ohost-cloud" {
+		t.Fatalf("slug = %q", got)
+	}
 }
 
 func TestEnableQueueViteAndPulseForwardFlags(t *testing.T) {

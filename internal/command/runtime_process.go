@@ -1,7 +1,10 @@
 package command
 
 import (
+	"crypto/rand"
 	"fmt"
+	"math/big"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -11,6 +14,7 @@ import (
 
 	apperrors "github.com/nixcp/nixcp/internal/errors"
 	"github.com/nixcp/nixcp/internal/execx"
+	"github.com/nixcp/nixcp/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -169,13 +173,23 @@ func enableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget, fl
 	if target == runtimeSchedule {
 		return updateSchedule(cmd, runtime, project, true)
 	}
+	if target == runtimeVite {
+		return enableVite(cmd, runtime, project, flags)
+	}
 	home, err := runtimeHome(runtime)
 	if err != nil {
 		return err
 	}
 	unit := target.unit(runtimeServiceSlug(runtime, project))
+	if err := enableRuntimeUnit(cmd, runtime, home, unit, renderRuntimeUnit(target, project, flags)); err != nil {
+		return err
+	}
+	return emitRuntimeResult(cmd, "enable", target, true)
+}
+
+func enableRuntimeUnit(cmd *cobra.Command, runtime Runtime, home, unit, content string) error {
 	path := filepath.Join(home, ".config", "systemd", "user", unit)
-	if err := writeGenerated(path, []byte(renderRuntimeUnit(target, project, flags))); err != nil {
+	if err := writeGenerated(path, []byte(content)); err != nil {
 		return apperrors.New("runtime_unit_write_failed", err.Error(), "Check that your user systemd directory is writable", apperrors.ExitCodeRuntime)
 	}
 	if err := runtimeSystemctl(cmd, runtime, "--user", "daemon-reload"); err != nil {
@@ -184,12 +198,97 @@ func enableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget, fl
 	if err := runtimeSystemctl(cmd, runtime, "--user", "enable", "--now", unit); err != nil {
 		return err
 	}
-	return emitRuntimeResult(cmd, "enable", target, true)
+	return nil
+}
+
+// enableVite reserves a distinct loopback port, persists it in the linked site
+// manifest (which renders the matching Nginx proxy location), then starts the
+// user unit with the same port. Vite must be enabled from a linked project:
+// without a site there is no safe virtual host to modify.
+func enableVite(cmd *cobra.Command, runtime Runtime, project string, flags []string) error {
+	store, err := siteStore(runtime)
+	if err != nil {
+		return err
+	}
+	snap, err := store.Load()
+	if err != nil {
+		return apperrors.New("not_configured", "NixCP is not initialized", "Run: ncp install", apperrors.ExitCodePrecond)
+	}
+	idx := -1
+	for i := range snap.Sites {
+		if filepath.Clean(snap.Sites[i].ProjectPath) == filepath.Clean(project) {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return apperrors.New("vite_site_not_found", "Vite requires the current project to be linked", "Run: ncp link <domain> --template laravel", apperrors.ExitCodePrecond)
+	}
+	site := snap.Sites[idx]
+	if !site.Enabled {
+		return apperrors.New("vite_site_disabled", "Vite requires an enabled linked site", "Enable or relink the site before enabling Vite", apperrors.ExitCodePrecond)
+	}
+	if site.Vite == nil {
+		port, err := reserveVitePort(snap)
+		if err != nil {
+			return apperrors.New("vite_port_unavailable", err.Error(), "Stop a local development server and try again", apperrors.ExitCodeRuntime)
+		}
+		snap.Sites[idx].Vite = &state.ViteConfig{Port: port}
+		snap.Canonicalize()
+		if err := snap.Validate(); err != nil {
+			return apperrors.New("invalid_vite", err.Error(), "Check the linked site configuration", apperrors.ExitCodePrecond)
+		}
+		// Nginx is switched before the user unit starts, so requests never route
+		// to an arbitrary port. Suppress the generic site result; this command
+		// reports one coherent Vite result after systemd has accepted the unit.
+		if err := applySite(cmd, runtime, store, snap, nil, "vite", snap.Sites[idx], true); err != nil {
+			return err
+		}
+		site = snap.Sites[idx]
+	}
+	home, err := runtimeHome(runtime)
+	if err != nil {
+		return err
+	}
+	unit := runtimeVite.unit(site.ID)
+	if err := enableRuntimeUnit(cmd, runtime, home, unit, renderViteRuntimeUnit(project, flags, site.Vite.Port)); err != nil {
+		return err
+	}
+	return emitRuntimeResult(cmd, "enable", runtimeVite, true)
+}
+
+func reserveVitePort(snap state.Snapshot) (int, error) {
+	used := map[int]bool{}
+	for _, site := range snap.Sites {
+		if site.Vite != nil {
+			used[site.Vite.Port] = true
+		}
+	}
+	for range 64 {
+		n, err := rand.Int(rand.Reader, big.NewInt(20000))
+		if err != nil {
+			return 0, err
+		}
+		port := 30000 + int(n.Int64())
+		if used[port] {
+			continue
+		}
+		listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			continue
+		}
+		_ = listener.Close()
+		return port, nil
+	}
+	return 0, fmt.Errorf("could not find an available loopback port")
 }
 
 func disableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget) error {
 	if target == runtimeSchedule {
 		return updateSchedule(cmd, runtime, "", false)
+	}
+	if target == runtimeVite {
+		return disableVite(cmd, runtime)
 	}
 	home, err := runtimeHome(runtime)
 	if err != nil {
@@ -200,6 +299,13 @@ func disableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget) e
 		return err
 	}
 	unit := target.unit(runtimeServiceSlug(runtime, project))
+	if err := disableRuntimeUnit(cmd, runtime, home, unit); err != nil {
+		return err
+	}
+	return emitRuntimeResult(cmd, "disable", target, true)
+}
+
+func disableRuntimeUnit(cmd *cobra.Command, runtime Runtime, home, unit string) error {
 	// Stop/disable before deleting the definition, so a running process cannot
 	// survive an otherwise successful removal.
 	if err := runtimeSystemctl(cmd, runtime, "--user", "disable", "--now", unit); err != nil {
@@ -211,7 +317,45 @@ func disableRuntime(cmd *cobra.Command, runtime Runtime, target runtimeTarget) e
 	if err := runtimeSystemctl(cmd, runtime, "--user", "daemon-reload"); err != nil {
 		return err
 	}
-	return emitRuntimeResult(cmd, "disable", target, true)
+	return nil
+}
+
+func disableVite(cmd *cobra.Command, runtime Runtime) error {
+	project, err := runtimeProjectDir()
+	if err != nil {
+		return err
+	}
+	store, err := siteStore(runtime)
+	if err != nil {
+		return err
+	}
+	snap, err := store.Load()
+	if err != nil {
+		return apperrors.New("not_configured", "NixCP is not initialized", "Run: ncp install", apperrors.ExitCodePrecond)
+	}
+	idx := -1
+	for i := range snap.Sites {
+		if filepath.Clean(snap.Sites[i].ProjectPath) == filepath.Clean(project) {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 || snap.Sites[idx].Vite == nil {
+		return apperrors.New("vite_not_enabled", "Vite is not enabled for the current linked site", "Run: ncp enable vite", apperrors.ExitCodePrecond)
+	}
+	home, err := runtimeHome(runtime)
+	if err != nil {
+		return err
+	}
+	if err := disableRuntimeUnit(cmd, runtime, home, runtimeVite.unit(snap.Sites[idx].ID)); err != nil {
+		return err
+	}
+	site := snap.Sites[idx]
+	snap.Sites[idx].Vite = nil
+	if err := applySite(cmd, runtime, store, snap, nil, "vite", site, true); err != nil {
+		return err
+	}
+	return emitRuntimeResult(cmd, "disable", runtimeVite, true)
 }
 
 func runtimeSystemctl(cmd *cobra.Command, runtime Runtime, args ...string) error {
@@ -246,6 +390,16 @@ func renderRuntimeUnit(target runtimeTarget, project string, flags []string) str
 	// scheduler remains intentionally fixed.
 	argv = append(argv, flags...)
 	return "[Unit]\nDescription=NixCP Laravel " + string(target) + "\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=" + systemdPath(project) + "\nEnvironment=PATH=" + systemdPath(runtimePath()) + "\nExecStart=" + systemdArgs(argv) + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
+}
+
+func renderViteRuntimeUnit(project string, flags []string, port int) string {
+	// `npm run` only forwards arguments after `--`. Place the enforced host and
+	// port last so a user-supplied development flag cannot desynchronise Nginx
+	// from the Vite server.
+	argv := []string{runtimeNPMBinary(), "run", "dev", "--"}
+	argv = append(argv, flags...)
+	argv = append(argv, "--host=127.0.0.1", fmt.Sprintf("--port=%d", port))
+	return "[Unit]\nDescription=NixCP Laravel vite\nAfter=network.target\n\n[Service]\nType=simple\nWorkingDirectory=" + systemdPath(project) + "\nEnvironment=PATH=" + systemdPath(runtimePath()) + "\nEnvironment=PORT=" + fmt.Sprintf("%d", port) + "\nExecStart=" + systemdArgs(argv) + "\nRestart=on-failure\nRestartSec=2\n\n[Install]\nWantedBy=default.target\n"
 }
 
 // User systemd and cron run with a deliberately sparse environment and do not

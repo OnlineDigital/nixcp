@@ -163,7 +163,12 @@ and start them immediately. Every user-systemd target accepts and preserves
 appended tool arguments; Pulse runs `ncp php artisan pulse:check`. Use
 `ncp restart queue|horizon|vite|reverb|octane|pulse` for user services, or
 `ncp restart php|mariadb|valkey|nginx` for the matching
-system service. NixCP does not configure Nginx for Reverb or Octane.
+system service. `ncp enable vite` must run from a linked site: it chooses and
+persists a distinct loopback port, starts Vite with that `PORT` (and an
+enforced `--port`), and regenerates Nginx to proxy `/@vite/` and `/resources/`
+with WebSocket/HMR headers to the same port. This applies independently of a
+Laravel template or custom location handler. NixCP does not configure Nginx
+for Reverb or Octane.
 
 ## Security and limitations
 

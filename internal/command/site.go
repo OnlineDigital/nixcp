@@ -197,7 +197,7 @@ func canonicalFile(p string) (string, error) {
 func validateSnippet(s string) error {
 	return nginxsnippet.Validate(s)
 }
-func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap state.Snapshot, deletes []string, action string, site state.SiteConfig) error {
+func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap state.Snapshot, deletes []string, action string, site state.SiteConfig, quiet ...bool) error {
 	module, e := runtime.Renderer.Render(snap)
 	if e != nil {
 		return apperrors.New("render_failed", e.Error(), "", apperrors.ExitCodeBuild)
@@ -243,6 +243,9 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	result, e := manager.Apply(cmd.Context(), transaction.Request{Files: files, Deletes: deletes, CandidateModule: "generated/nixcp-module.nix", Affected: affected})
 	if e != nil {
 		return transactionError(e)
+	}
+	if len(quiet) > 0 && quiet[0] {
+		return nil
 	}
 	data := map[string]any{"id": site.ID, "domain": site.Domain, "php": site.PHP, "documentRoot": site.DocumentRoot, "handler": site.Nginx.Handler.Type, "phase": result.Phase}
 	if site.MariaDB != nil {

@@ -76,6 +76,7 @@ type SiteConfig struct {
 	DocumentRoot  string         `yaml:"documentRoot"`
 	PHP           string         `yaml:"php"`
 	MariaDB       *MariaDBConfig `yaml:"mariadb,omitempty"`
+	Vite          *ViteConfig    `yaml:"vite,omitempty"`
 	Nginx         NginxConfig    `yaml:"nginx"`
 }
 type MariaDBConfig struct {
@@ -90,6 +91,13 @@ type MariaDBConfig struct {
 	// ~/.nixcp/secrets/mariadb/accounts.sql file that the oneshot unit reads via
 	// stdin.
 	Password string `yaml:"password,omitempty"`
+}
+
+// ViteConfig records the private local port that Nginx proxies for a site's
+// development server. It is deliberately site-scoped so several projects can
+// use Vite at the same time.
+type ViteConfig struct {
+	Port int `yaml:"port"`
 }
 type NginxConfig struct {
 	Handler HandlerConfig `yaml:"handler"`
@@ -330,6 +338,9 @@ func ValidateSite(site SiteConfig) error {
 		if !databasePasswordPattern.MatchString(site.MariaDB.Password) {
 			return newStateError("invalid_mariadb", "MariaDB password must be 16-64 alphanumeric characters", nil)
 		}
+	}
+	if site.Vite != nil && (site.Vite.Port < 1024 || site.Vite.Port > 65535) {
+		return newStateError("invalid_vite", "Vite port must be between 1024 and 65535", nil)
 	}
 	return nil
 }

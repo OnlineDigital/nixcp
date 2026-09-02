@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,12 +46,25 @@ func TestEnableQueueViteAndPulseForwardFlags(t *testing.T) {
 	for _, target := range []struct{ name, want string }{
 		{"queue", `"queue:work" "--tries=3"`},
 		{"horizon", `"horizon" "--balance=auto"`},
-		{"vite", `"run" "dev" "--host"`},
+		{"vite", `"--host"`},
 		{"pulse", `"pulse:check" "--no-interaction"`},
 	} {
 		t.Run(target.name, func(t *testing.T) {
 			rt, _, home := runtimeTest(t)
 			project := t.TempDir()
+			if target.name == "vite" {
+				config := testSiteConfig(home)
+				config.Services.Nginx.Installed = true
+				config.Services.Nginx.DesiredState = "running"
+				snap := state.Snapshot{Config: config, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "vite-example", Enabled: true, Domain: "vite.example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}}}}
+				if err := state.NewStore(home).Initialize(config); err != nil {
+					t.Fatal(err)
+				}
+				if err := state.NewStore(home).WriteSnapshot(snap); err != nil {
+					t.Fatal(err)
+				}
+				rt.Transactions = testTransaction(home)
+			}
 			old, _ := os.Getwd()
 			defer os.Chdir(old)
 			if err := os.Chdir(project); err != nil {
@@ -69,7 +83,11 @@ func TestEnableQueueViteAndPulseForwardFlags(t *testing.T) {
 			if _, err := execute(t, rt, "enable", target.name, flag); err != nil {
 				t.Fatal(err)
 			}
-			body, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", runtimeTarget(target.name).unit(runtimeProjectSlug(project))))
+			slug := runtimeProjectSlug(project)
+			if target.name == "vite" {
+				slug = "vite-example"
+			}
+			body, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", runtimeTarget(target.name).unit(slug)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,6 +95,58 @@ func TestEnableQueueViteAndPulseForwardFlags(t *testing.T) {
 				t.Fatalf("unit did not preserve flag:\n%s", body)
 			}
 		})
+	}
+}
+
+func TestEnableVitePersistsPortAndNginxProxy(t *testing.T) {
+	rt, _, home := runtimeTest(t)
+	project := t.TempDir()
+	config := testSiteConfig(home)
+	config.Services.Nginx.Installed = true
+	config.Services.Nginx.DesiredState = "running"
+	snap := state.Snapshot{Config: config, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "vite-example", Enabled: true, Domain: "vite.example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "custom", Path: filepath.Join(project, "nginx.conf"), Content: "try_files $uri $uri/ /index.php?$query_string;"}}}}}
+	if err := os.WriteFile(filepath.Join(project, "nginx.conf"), []byte("try_files $uri $uri/ /index.php?$query_string;"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	if err := store.Initialize(config); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	rt.Transactions = testTransaction(home)
+	old, _ := os.Getwd()
+	defer os.Chdir(old)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execute(t, rt, "enable", "vite"); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := updated.Sites[0].Vite.Port
+	if port < 30000 || port >= 50000 {
+		t.Fatalf("unexpected Vite port %d", port)
+	}
+	unit, err := os.ReadFile(filepath.Join(home, ".config", "systemd", "user", runtimeVite.unit("vite-example")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(unit), "Environment=PORT="+fmt.Sprint(port)) || !strings.Contains(string(unit), "\"--port="+fmt.Sprint(port)+"\"") {
+		t.Fatalf("unit does not use persisted Vite port:\n%s", unit)
+	}
+	module, err := os.ReadFile(filepath.Join(store.Root, "generated", "nixcp-module.nix"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"locations.\"~ ^/(@vite|resources)/\"", "proxy_pass http://127.0.0.1:" + fmt.Sprint(port), "proxy_set_header Upgrade $http_upgrade", "try_files $uri $uri/ /index.php?$query_string"} {
+		if !strings.Contains(string(module), want) {
+			t.Fatalf("generated module missing %q:\n%s", want, module)
+		}
 	}
 }
 

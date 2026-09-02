@@ -199,6 +199,10 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, ext
 		content = "try_files $uri $uri/ =404;"
 	}
 	fmt.Fprintf(b, "    locations.\"/\".extraConfig = %s;\n", nixString(content))
+	if s.Vite != nil {
+		vite := fmt.Sprintf("proxy_pass http://127.0.0.1:%d; proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection \"Upgrade\"; proxy_set_header Host $host; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto $scheme;", s.Vite.Port)
+		fmt.Fprintf(b, "    locations.\"~ ^/(@vite|resources)/\".extraConfig = %s;\n", nixString(vite))
+	}
 	// Keep the Nix package interpolation intentional: nixString escapes `${…}`
 	// in dynamic text, but Nginx must receive the resolved store path rather
 	// than the literal characters `${pkgs.nginx}`.

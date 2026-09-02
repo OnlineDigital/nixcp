@@ -393,9 +393,8 @@ func renderRuntimeUnit(target runtimeTarget, project string, flags []string) str
 }
 
 func renderViteRuntimeUnit(project string, flags []string, port int) string {
-	// `npm run` only forwards arguments after `--`. Place the enforced host and
-	// port last so a user-supplied development flag cannot desynchronise Nginx
-	// from the Vite server.
+	// `npm run` only forwards arguments after `--`. Host and port are enforced
+	// last so Vite remains local-only and cannot desynchronise from Nginx.
 	argv := []string{runtimeNPMBinary(), "run", "dev", "--"}
 	argv = append(argv, flags...)
 	argv = append(argv, "--host=127.0.0.1", fmt.Sprintf("--port=%d", port))

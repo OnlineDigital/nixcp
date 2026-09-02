@@ -143,10 +143,13 @@ func TestEnableVitePersistsPortAndNginxProxy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"locations.\"~ ^/(@vite|resources)/\"", "proxy_pass http://127.0.0.1:" + fmt.Sprint(port), "proxy_set_header Upgrade $http_upgrade", "try_files $uri $uri/ /index.php?$query_string"} {
+	for _, want := range []string{"locations.\"~ ^/(@vite|resources|node_modules|@react-refresh)(/|$)\"", "proxy_pass http://127.0.0.1:" + fmt.Sprint(port), "proxy_set_header Upgrade $http_upgrade", "try_files $uri $uri/ /index.php?$query_string"} {
 		if !strings.Contains(string(module), want) {
 			t.Fatalf("generated module missing %q:\n%s", want, module)
 		}
+	}
+	if !strings.Contains(string(unit), "--host=127.0.0.1") {
+		t.Fatalf("unit must bind Vite to loopback:\n%s", unit)
 	}
 }
 

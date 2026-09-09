@@ -224,12 +224,22 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 		deletes = append(deletes, secretDeletes...)
 	}
 	manager := runtime.Transactions
+	var appWarnings []string
 	if manager == nil {
 		dbCheck := runtime.DatabaseCheck
 		dbCheck = credentialedDatabaseCheck(dbCheck, snap.Sites)
+		siteHealth := siteTransactionHealth(runtime, snap)
+		// During a site transaction, HTTP error responses from the
+		// application itself must not roll back freshly provisioned
+			// infrastructure (an imported app returns 500 until the database
+		// import and configuration are done). Socket and nginx checks stay
+			// fatal: they prove the wiring NixCP provisioned actually works.
+		siteHealth.ApplicationWarning = func(status sitepkg.HealthStatus) {
+			appWarnings = append(appWarnings, status.Describe())
+		}
 		manager = defaultServiceTransaction(store.Root, runtime, snap.Config.Rebuild, transaction.CompositeHealth{
 			desiredHealth{systemd: runtime.Services, name: "nginx", running: true},
-			siteTransactionHealth(runtime, snap),
+			siteHealth,
 			dbCheck,
 		})
 	}
@@ -251,10 +261,17 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	if site.MariaDB != nil {
 		data["mariadb"] = map[string]any{"database": site.MariaDB.Database, "user": site.MariaDB.User, "password": site.MariaDB.Password}
 	}
+	var warnings any
+	if len(appWarnings) > 0 {
+		warnings = appWarnings
+	}
 	if commandJSON(cmd) {
-		return emitJSON(cmd, output.Success(action, result.Changed, data, nil))
+		return emitJSON(cmd, output.Success(action, result.Changed, data, warnings))
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
+	for _, w := range appWarnings {
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s (infrastructura a fost aplicata; erorile aplicatiei nu declanseaza rollback)\n", ui.WarnLine(w))
+	}
 	if site.MariaDB != nil {
 		fmt.Fprintf(cmd.OutOrStdout(), "  database: %s (user: %s, password: %s)\n", site.MariaDB.Database, site.MariaDB.User, site.MariaDB.Password)
 	}

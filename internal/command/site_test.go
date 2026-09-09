@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -161,6 +162,106 @@ type recordingDatabaseHealth struct{ affected []string }
 func (h *recordingDatabaseHealth) Check(_ context.Context, affected []string) error {
 	h.affected = append([]string(nil), affected...)
 	return nil
+}
+
+type appErrorProbe struct{ calls int }
+
+func (p *appErrorProbe) CheckSite(_ context.Context, domain, id string, enabled bool) sitepkg.HealthStatus {
+	p.calls++
+	return sitepkg.HealthStatus{Domain: domain, SiteID: id, DesiredOn: enabled, SocketOK: true, HTTPOK: false, HTTPStatus: 500, ProblemCode: "site_not_reachable"}
+}
+
+type socketMissingProbe struct{ calls int }
+
+func (p *socketMissingProbe) CheckSite(_ context.Context, domain, id string, enabled bool) sitepkg.HealthStatus {
+	p.calls++
+	return sitepkg.HealthStatus{Domain: domain, SiteID: id, DesiredOn: enabled, SocketOK: false, HTTPOK: false, HTTPStatus: 0, ProblemCode: "php_fpm_socket_missing"}
+}
+
+func TestLinkSucceedsWithWarningWhenApplicationReturnsError(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	probe := &appErrorProbe{}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{Handle: func(command *execx.Command) (execx.Result, error) {
+		if command.Name == "readlink" {
+			return execx.Result{Stdout: "/nix/store/test-system"}, nil
+		}
+		return execx.Result{}, nil
+	}}), WithServices(testSystemd{}), WithNginxConfigVerifier(&recordingNginxConfig{}), WithSiteChecker(probe), WithDatabaseChecker(&testHealth{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := testSiteConfig(home)
+	cfg.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	cfg.Services.MariaDB = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"--json", "link", "broken.example", "--php", "8.3", "--path", project, "--mariadb", "app"})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("link exit %d despite app-only 500 (socket ok): out=%s err=%s", code, out, stderr)
+	}
+	if probe.calls != 1 {
+		t.Fatalf("expected exactly one site probe, got %d", probe.calls)
+	}
+	envelope := envelopeFromJSON(t, out.String())
+	if !envelope.Ok {
+		t.Fatalf("expected success envelope")
+	}
+	if warnings, ok := envelope.Warnings.([]any); !ok || len(warnings) == 0 {
+		t.Fatalf("expected at least one warning, got %#v", envelope.Warnings)
+	} else if !strings.Contains(fmt.Sprint(warnings[0]), "broken.example") {
+		t.Fatalf("warning does not mention the site: %#v", warnings[0])
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range snap.Sites {
+		if s.Domain == "broken.example" && s.MariaDB != nil && s.MariaDB.Database == "app" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("site+database must survive when only the application errors, sites=%#v", snap.Sites)
+	}
+}
+
+func TestLinkStillFailsWhenPHPSocketMissing(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	probe := &socketMissingProbe{}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(&execx.FakeRunner{Handle: func(command *execx.Command) (execx.Result, error) {
+		if command.Name == "readlink" {
+			return execx.Result{Stdout: "/nix/store/test-system"}, nil
+		}
+		return execx.Result{}, nil
+	}}), WithServices(testSystemd{}), WithNginxConfigVerifier(&recordingNginxConfig{}), WithSiteChecker(probe))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	cfg := testSiteConfig(home)
+	cfg.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	if err := store.Initialize(cfg); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"link", "socket.example", "--php", "8.3", "--path", project})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code == 0 {
+		t.Fatal("link must fail when the PHP-FPM socket is missing")
+	}
+	if probe.calls != 1 {
+		t.Fatalf("expected exactly one site probe, got %d", probe.calls)
+	}
+	if !strings.Contains(stderr.String(), "service_transaction_failed") {
+		t.Fatalf("expected service_transaction_failed, err=%s", stderr.String())
+	}
 }
 
 func TestLinkDefaultTransactionRunsSiteAndDeclaredDatabaseHealth(t *testing.T) {

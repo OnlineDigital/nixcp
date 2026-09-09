@@ -77,6 +77,10 @@ type TransactionHealth struct {
 	Config  ConfigVerifier
 	Checker Checker
 	Sites   map[string]state.SiteConfig
+	// ApplicationWarning makes HTTP error responses advisory during initial
+	// provisioning. Socket failures and transport failures remain fatal.
+	// Nil preserves strict application health checks for other callers.
+	ApplicationWarning func(HealthStatus)
 }
 
 func (h TransactionHealth) Check(ctx context.Context, affected []string) error {
@@ -110,6 +114,12 @@ func (h TransactionHealth) Check(ctx context.Context, affected []string) error {
 			return fmt.Errorf("site health received unknown site %q", id)
 		}
 		status := h.Checker.CheckSite(ctx, s.Domain, s.ID, s.Enabled)
+		if h.ApplicationWarning != nil && status.DesiredOn && status.SocketOK &&
+			status.HTTPStatus >= 500 && status.HTTPStatus <= 599 &&
+			(status.ProblemCode == "" || status.ProblemCode == "site_not_reachable") {
+			h.ApplicationWarning(status)
+			continue
+		}
 		if !status.DesiredOn || !status.SocketOK || !status.HTTPOK || status.ProblemCode != "" {
 			return fmt.Errorf("site health failed: %s", status.Describe())
 		}

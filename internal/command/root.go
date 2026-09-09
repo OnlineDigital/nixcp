@@ -227,7 +227,7 @@ func NewRootCommand(ctx context.Context, opts ...RuntimeOption) (*cobra.Command,
 	root.PersistentFlags().Bool("json", false, "Emit a single JSON object")
 	root.PersistentFlags().Bool("no-input", false, "Disable interactive prompts")
 	root.PersistentFlags().Bool("yes", false, "Skip confirmation prompts")
-	root.PersistentFlags().Duration("timeout", 30*time.Second, "Operation timeout")
+	root.PersistentFlags().Duration("timeout", 0, "Operation timeout (0 = unlimited)")
 
 	root.AddCommand(newInstallCommand(runtime))
 	root.AddCommand(newStatusCommand(runtime))

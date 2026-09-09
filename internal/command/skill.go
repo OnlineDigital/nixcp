@@ -60,7 +60,7 @@ func newSkillCommand() *cobra.Command {
 			b.WriteString("  --json — Emit a single JSON object\n")
 			b.WriteString("  --no-input — Disable interactive prompts\n")
 			b.WriteString("  --yes — Skip confirmation prompts\n")
-			b.WriteString("  --timeout <duration> — Operation timeout (default: 30s)\n")
+			b.WriteString("  --timeout <duration> — Operation timeout (0 = unlimited)\n")
 			cmd.Print(b.String())
 			return nil
 		},

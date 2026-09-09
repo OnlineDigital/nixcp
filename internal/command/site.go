@@ -270,7 +270,7 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
 	for _, w := range appWarnings {
-		fmt.Fprintf(cmd.OutOrStdout(), "  %s (infrastructura a fost aplicata; erorile aplicatiei nu declanseaza rollback)\n", ui.WarnLine(w))
+		fmt.Fprintf(cmd.OutOrStdout(), "  %s (infrastructure applied; application errors do not trigger rollback)\n", ui.WarnLine(w))
 	}
 	if site.MariaDB != nil {
 		fmt.Fprintf(cmd.OutOrStdout(), "  database: %s (user: %s, password: %s)\n", site.MariaDB.Database, site.MariaDB.User, site.MariaDB.Password)

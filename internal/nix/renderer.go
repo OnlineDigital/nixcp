@@ -210,7 +210,16 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, ext
 	fmt.Fprintf(b, "  services.nginx.virtualHosts.%s = {\n", nixString(s.Domain))
 	b.WriteString("    listen = [{ addr = \"0.0.0.0\"; port = 80; }];\n")
 	fmt.Fprintf(b, "    root = %s;\n", nixString(s.DocumentRoot))
-	b.WriteString("    extraConfig = \"\";\n")
+	// `try_files $uri $uri/ ...` intentionally accepts existing directories.
+	// Framework front-controller templates therefore need PHP declared as an
+	// index file; otherwise a request for `/` stops at the document root and
+	// Nginx returns "directory index ... is forbidden" instead of dispatching
+	// to index.php. Leave custom and generic handlers entirely user-controlled.
+	extraConfig := ""
+	if s.Nginx.Handler.Type == "template" {
+		extraConfig = "index index.php;"
+	}
+	fmt.Fprintf(b, "    extraConfig = %s;\n", nixString(extraConfig))
 	content := templateContent(s.Nginx.Handler.Name)
 	if s.Nginx.Handler.Type == "custom" {
 		content = s.Nginx.Handler.Content

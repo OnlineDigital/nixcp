@@ -31,6 +31,22 @@ func TestRenderIsDeterministicAndHTTPOnly(t *testing.T) {
 	if !strings.Contains(text, Marker) || !strings.Contains(text, "port = 80") || strings.Contains(strings.ToLower(text), "ssl") {
 		t.Fatalf("unexpected module: %s", text)
 	}
+	if !strings.Contains(text, "extraConfig = \"index index.php;\";") {
+		t.Fatalf("framework templates must declare index.php as the directory index: %s", text)
+	}
+}
+
+func TestRenderGenericHandlerKeepsVHostConfigUntouched(t *testing.T) {
+	path := t.TempDir()
+	c := state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", Group: "g", Home: "/tmp/u"}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}}}
+	s := state.Snapshot{Config: c, Sites: []state.SiteConfig{{SchemaVersion: 2, ID: "example-com", Enabled: true, Domain: "example.com", ProjectPath: path, DocumentRoot: path, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}}}}
+	b, err := (Renderer{}).Render(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "index index.php;") {
+		t.Fatalf("generic handler must not receive a PHP index directive:\n%s", b)
+	}
 }
 
 func TestRenderPHP85SkipsUnavailableOpcacheAttribute(t *testing.T) {

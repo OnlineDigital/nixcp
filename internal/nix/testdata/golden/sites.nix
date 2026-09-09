@@ -11,7 +11,7 @@
   services.nginx.virtualHosts."example.test" = {
     listen = [{ addr = "0.0.0.0"; port = 80; }];
     root = "/home";
-    extraConfig = "";
+    extraConfig = "index index.php;";
     locations."/".extraConfig = "try_files $uri $uri/ /index.php?$query_string;";
     locations."~ \.php$".extraConfig = "include ${pkgs.nginx}/conf/fastcgi.conf; fastcgi_pass unix:/run/phpfpm/nixcp-example-test.sock;";
   };

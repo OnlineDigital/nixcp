@@ -4,6 +4,14 @@
   assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux"; message = "NixCP requires x86_64-linux"; }];
   environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
   services.nginx.enable = true;
+  systemd.services.nixcp-nginx-home-acl = {
+    description = "NixCP Nginx home-directory ACL";
+    after = [ "local-fs.target" ];
+    before = [ "nginx.service" ];
+    wantedBy = [ "nginx.service" ];
+    serviceConfig.Type = "oneshot";
+    script = "${pkgs.acl}/bin/setfacl -m u:nginx:--x,m::--x -- '/home/nixcp'";
+  };
   environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/share/php/composer/bin/composer";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";
   environment.etc."nixcp/php/8.4/bin/php".source = "${(pkgs.php84.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";

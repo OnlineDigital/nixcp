@@ -35,6 +35,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	b.WriteString("  assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == \"x86_64-linux\"; message = \"NixCP requires x86_64-linux\"; }];\n")
 	b.WriteString("  environment.etc.\"nixcp/module-marker\".text = \"" + Marker + "\\n\";\n")
 	renderServices(&b, s.Config)
+	renderNginxHomeACL(&b, s.Config)
 	renderMariaDBAccounts(&b, s.Config, s.Sites)
 	renderPHP(&b, s.Config)
 	renderViteWebSocketMap(&b, s.Sites)
@@ -88,6 +89,30 @@ func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 		fmt.Fprintf(b, "  services.mysql.ensureDatabases = [ %s ];\n", strings.Join(values, " "))
 	}
 }
+
+// renderNginxHomeACL makes the owner's home searchable (but not listable) by
+// Nginx before it starts. A later chmod(2) on a directory with an access ACL
+// changes the ACL mask to match the Unix group bits, which can silently turn
+// user:nginx:--x into an ineffective entry after a reboot. Reapplying both the
+// named entry and its mask on every Nginx start keeps document roots below the
+// home directory available without exposing its directory listing.
+func renderNginxHomeACL(b *strings.Builder, c state.ConfigSnapshot) {
+	if !c.Services.Nginx.Installed || c.Services.Nginx.DesiredState != "running" {
+		return
+	}
+	payload := "@ACL@/bin/setfacl -m u:nginx:--x,m::--x -- " + shellQuote(c.Owner.Home)
+	encoded := strings.ReplaceAll(nixString(payload), "@ACL@", "${pkgs.acl}")
+	b.WriteString("  systemd.services.nixcp-nginx-home-acl = {\n")
+	b.WriteString("    description = \"NixCP Nginx home-directory ACL\";\n")
+	b.WriteString("    after = [ \"local-fs.target\" ];\n")
+	b.WriteString("    before = [ \"nginx.service\" ];\n")
+	b.WriteString("    wantedBy = [ \"nginx.service\" ];\n")
+	b.WriteString("    serviceConfig.Type = \"oneshot\";\n")
+	fmt.Fprintf(b, "    script = %s;\n", encoded)
+	b.WriteString("  };\n")
+}
+
+func shellQuote(v string) string { return "'" + strings.ReplaceAll(v, "'", "'\\''") + "'" }
 
 // Standard NixOS modules keep package/configuration available when enabled.
 // wantedBy is explicitly cleared for stopped services so the desired boot policy

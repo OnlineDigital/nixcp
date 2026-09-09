@@ -34,6 +34,9 @@ func TestRenderIsDeterministicAndHTTPOnly(t *testing.T) {
 	if !strings.Contains(text, "extraConfig = \"index index.php;\";") {
 		t.Fatalf("framework templates must declare index.php as the directory index: %s", text)
 	}
+	if !strings.Contains(text, "systemd.services.nixcp-nginx-home-acl") || !strings.Contains(text, "setfacl -m u:nginx:--x,m::--x") {
+		t.Fatalf("running Nginx must restore its searchable home ACL: %s", text)
+	}
 }
 
 func TestRenderGenericHandlerKeepsVHostConfigUntouched(t *testing.T) {

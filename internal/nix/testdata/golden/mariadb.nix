@@ -18,10 +18,11 @@
   };
   systemd.services.nixcp-mariadb-accounts = {
     description = "NixCP per-site MariaDB accounts";
+    requires = [ "mysql.service" ];
     after = [ "mysql.service" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-    script = "# nixcp-mariadb-accounts sha256=655bd03c8edcea8d\n${pkgs.mariadb}/bin/mariadb --protocol=socket -u root --batch < /home/nixcp/.nixcp/secrets/mariadb/accounts.sql";
+    script = "# nixcp-mariadb-accounts sha256=655bd03c8edcea8d\nfor attempt in {1..60}; do\n  if ${pkgs.mariadb}/bin/mariadb-admin --protocol=socket -u root --silent ping; then\n    ${pkgs.mariadb}/bin/mariadb --protocol=socket -u root --batch < /home/nixcp/.nixcp/secrets/mariadb/accounts.sql\n    exit 0\n  fi\n  ${pkgs.coreutils}/bin/sleep 1\ndone\necho 'MariaDB socket did not become ready within 60 seconds' >&2\nexit 1";
   };
   environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/share/php/composer/bin/composer";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";

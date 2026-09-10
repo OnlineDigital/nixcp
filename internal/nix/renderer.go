@@ -155,8 +155,10 @@ func MariaDBAccountsSQL(c state.ConfigSnapshot, sites []state.SiteConfig) string
 
 // renderMariaDBAccounts emits a deterministic oneshot unit that provisions a
 // dedicated account (user = database name) per site database, idempotently. It
-// runs after mysql.service and only when MariaDB is installed and desired
-// running. The password stays in a private 0600 SQL file under ~/.nixcp and is
+// requires and runs after mysql.service, and only when MariaDB is installed
+// and desired running. Since an active mysql.service can briefly precede socket
+// readiness, the script waits up to 60 seconds for a successful local ping.
+// The password stays in a private 0600 SQL file under ~/.nixcp and is
 // never written into the world-readable Nix store here: the unit only references
 // the path to that file and feeds it to mariadb via stdin. The comment carries a
 // SHA-256 of the SQL so a password rotation changes the unit text and re-triggers
@@ -175,10 +177,21 @@ func renderMariaDBAccounts(b *strings.Builder, c state.ConfigSnapshot, sites []s
 	// encoder, so it is carried as a plain-text placeholder and substituted
 	// after escaping (nixString would already have escaped any ${…}).
 	payload := "# nixcp-mariadb-accounts sha256=" + hash + "\n" +
-		"@MARIADB@/bin/mariadb --protocol=socket -u root --batch < " + nixcpMariaDBSecretPath(c.Owner.Home)
-	encoded := strings.ReplaceAll(nixString(payload), "@MARIADB@", "${pkgs.mariadb}")
+		"for attempt in {1..60}; do\n" +
+		"  if @MARIADB@/bin/mariadb-admin --protocol=socket -u root --silent ping; then\n" +
+		"    @MARIADB@/bin/mariadb --protocol=socket -u root --batch < " + nixcpMariaDBSecretPath(c.Owner.Home) + "\n" +
+		"    exit 0\n" +
+		"  fi\n" +
+		"  @COREUTILS@/bin/sleep 1\n" +
+		"done\n" +
+		"echo 'MariaDB socket did not become ready within 60 seconds' >&2\n" +
+		"exit 1"
+	encoded := nixString(payload)
+	encoded = strings.ReplaceAll(encoded, "@MARIADB@", "${pkgs.mariadb}")
+	encoded = strings.ReplaceAll(encoded, "@COREUTILS@", "${pkgs.coreutils}")
 	b.WriteString("  systemd.services.nixcp-mariadb-accounts = {\n")
 	b.WriteString("    description = \"NixCP per-site MariaDB accounts\";\n")
+	b.WriteString("    requires = [ \"mysql.service\" ];\n")
 	b.WriteString("    after = [ \"mysql.service\" ];\n")
 	b.WriteString("    wantedBy = [ \"multi-user.target\" ];\n")
 	b.WriteString("    serviceConfig = { Type = \"oneshot\"; RemainAfterExit = true; };\n")

@@ -157,4 +157,11 @@ func TestRenderMariaDBAccountsNeverLeaksPassword(t *testing.T) {
 	if !strings.Contains(text, "nixcp-mariadb-accounts sha256=") {
 		t.Fatalf("module must carry a deterministic SQL digest to drive rotation: %s", text)
 	}
+	if !strings.Contains(text, `requires = [ "mysql.service" ];`) {
+		t.Fatalf("accounts unit must require MariaDB: %s", text)
+	}
+	if !strings.Contains(text, "mariadb-admin --protocol=socket -u root --silent ping") ||
+		!strings.Contains(text, "MariaDB socket did not become ready within 60 seconds") {
+		t.Fatalf("accounts unit must wait for MariaDB socket readiness: %s", text)
+	}
 }

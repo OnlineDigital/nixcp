@@ -29,6 +29,9 @@ func TestPatchViteConfigKeepsExistingTrailingComma(t *testing.T) {
 	if !strings.Contains(text, "},\n}") {
 		t.Fatalf("new server object must have a trailing comma:\n%s", text)
 	}
+	if !strings.Contains(text, "    server: {\n        host:") {
+		t.Fatalf("new server children must be indented one level further:\n%s", text)
+	}
 }
 
 func TestPatchViteConfigAddsServerWithoutReserializing(t *testing.T) {

@@ -299,7 +299,11 @@ func viteObjectAdditions(src []byte, o viteObject, fields []viteField) string {
 	}
 	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
-		parts = append(parts, f.name+": "+f.value+",")
+		// The property itself starts after prefix. Indent every subsequent line
+		// of a multiline value one level further, so a newly added `server`
+		// block follows the surrounding object's formatting.
+		value := strings.ReplaceAll(f.value, "\n", "\n    ")
+		parts = append(parts, f.name+": "+value+",")
 	}
 	return prefix + strings.Join(parts, "\n    ") + "\n"
 }

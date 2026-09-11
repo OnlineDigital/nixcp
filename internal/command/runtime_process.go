@@ -228,6 +228,9 @@ func enableVite(cmd *cobra.Command, runtime Runtime, project string, flags []str
 	if !site.Enabled {
 		return apperrors.New("vite_site_disabled", "Vite requires an enabled linked site", "Enable or relink the site before enabling Vite", apperrors.ExitCodePrecond)
 	}
+	if err := prepareViteConfigUpdate(cmd, runtime, project); err != nil {
+		return err
+	}
 	if site.Vite == nil {
 		port, err := reserveVitePort(snap)
 		if err != nil {

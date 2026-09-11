@@ -168,8 +168,16 @@ persists a distinct loopback port, starts Vite with that `PORT` (and an
 enforced `--port`), and regenerates Nginx to proxy Vite/HMR endpoints,
 including `/@vite/`, `/resources/`, all `/node_modules/` paths, and
 `/@react-refresh`, to the same port. Vite is bound to `127.0.0.1`; this
-applies independently of a Laravel template or custom location handler. NixCP
-does not configure Nginx for Reverb or Octane.
+applies independently of a Laravel template or custom location handler. In an
+interactive terminal, when a single root `vite.config.js`, `.ts`, `.mjs`, or
+`.mts` exists, NixCP offers to patch its static `server` object for the public
+HMR endpoint (`0.0.0.0`, `renew-crm.p.ohost.cloud`, `wss`, and port `443`) and
+ignore Laravel's compiled views. The patch is source-preserving rather than a
+config reserialization: it only replaces/inserts relevant object properties,
+then shows a `git diff` preview. You can accept it, cancel and restore the
+original file, or make a final change using `$EDITOR`. Piped, `--no-input`,
+and JSON runs never change project configuration. NixCP does not configure
+Nginx for Reverb or Octane.
 
 ## Security and limitations
 

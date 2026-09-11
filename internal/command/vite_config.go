@@ -291,14 +291,17 @@ func viteObjectAddition(src []byte, o viteObject, name, value string) string {
 func viteObjectAdditions(src []byte, o viteObject, fields []viteField) string {
 	body := bytes.TrimSpace(src[o.open+1 : o.close])
 	prefix := "\n    "
-	if len(body) > 0 {
+	// Do not introduce a standalone comma when the preceding property already
+	// has a trailing comma. New properties themselves always receive one, in
+	// the established Vite/TypeScript style.
+	if len(body) > 0 && body[len(body)-1] != ',' {
 		prefix = ",\n    "
 	}
 	parts := make([]string, 0, len(fields))
 	for _, f := range fields {
-		parts = append(parts, f.name+": "+f.value)
+		parts = append(parts, f.name+": "+f.value+",")
 	}
-	return prefix + strings.Join(parts, ",\n    ") + "\n"
+	return prefix + strings.Join(parts, "\n    ") + "\n"
 }
 func applyViteEdits(src []byte, edits []viteEdit) []byte {
 	sort.SliceStable(edits, func(i, j int) bool { return edits[i].start > edits[j].start })

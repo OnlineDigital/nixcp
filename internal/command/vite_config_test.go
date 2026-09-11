@@ -16,6 +16,21 @@ func TestViteEditorName(t *testing.T) {
 	}
 }
 
+func TestPatchViteConfigKeepsExistingTrailingComma(t *testing.T) {
+	in := "export default {\n  plugins: [],\n}\n"
+	out, err := patchViteConfig([]byte(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(out)
+	if strings.Contains(text, "plugins: [],\n,\n") {
+		t.Fatalf("inserted a standalone comma:\n%s", text)
+	}
+	if !strings.Contains(text, "},\n}") {
+		t.Fatalf("new server object must have a trailing comma:\n%s", text)
+	}
+}
+
 func TestPatchViteConfigAddsServerWithoutReserializing(t *testing.T) {
 	in := "import { defineConfig } from 'vite'\n\nexport default defineConfig({\n  // Preserve me\n  plugins: [],\n})\n"
 	out, err := patchViteConfig([]byte(in))

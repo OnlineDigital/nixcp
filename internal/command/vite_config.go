@@ -126,7 +126,10 @@ func showViteConfigDiff(cmd *cobra.Command, runtime Runtime, path string, origin
 	if err := tmp.Close(); err != nil {
 		return apperrors.New("vite_config_diff_failed", err.Error(), "", apperrors.ExitCodeRuntime)
 	}
-	res, err := runtime.Runner.Run(cmd.Context(), &execx.Command{Name: "git", Args: []string{"--no-pager", "diff", "--no-index", "--no-color", "--no-ext-diff", "--label", "a/" + filepath.Base(path), "--label", "b/" + filepath.Base(path), tmpName, path}})
+	// --label is not supported by every Git build (notably older Nix Git
+	// packages). --no-index works outside a repository and still gives the
+	// user a normal, color-free review diff without relying on that option.
+	res, err := runtime.Runner.Run(cmd.Context(), &execx.Command{Name: "git", Args: []string{"--no-pager", "diff", "--no-index", "--no-color", "--no-ext-diff", tmpName, path}})
 	if err != nil && res.ExitCode != 1 {
 		return apperrors.New("vite_config_diff_failed", strings.TrimSpace(res.Stderr), "Ensure git is installed", apperrors.ExitCodeRuntime)
 	}

@@ -190,3 +190,26 @@ nginx:
 		t.Fatalf("expected php-related semantic error, got %v", err)
 	}
 }
+
+func TestConfigHooksPostLinkValidation(t *testing.T) {
+	// Round-trip: a single-line postLink command parses and canonicalizes.
+	doc := validConfigYAML(t.TempDir()) + "hooks:\n  postLink: curl -fs http://proxy/internal?domain=$VHOST\n"
+	cfg, err := NormalizeAndValidateConfig([]byte(doc))
+	if err != nil {
+		t.Fatalf("expected hooks.postLink to parse, got %v", err)
+	}
+	if cfg.Hooks.PostLink == "" {
+		t.Fatal("expected postLink to be set")
+	}
+	// Multi-line commands are rejected: config.yaml stays line-oriented.
+	bad := validConfigYAML(t.TempDir()) + "hooks:\n  postLink: |\n    curl -fs http://proxy\n    curl http://other\n"
+	if _, err := NormalizeAndValidateConfig([]byte(bad)); err == nil {
+		t.Fatal("expected multi-line postLink to be rejected")
+	}
+	// Oversized commands are rejected.
+	huge := strings.Repeat("a", 5000)
+	big := validConfigYAML(t.TempDir()) + "hooks:\n  postLink: " + huge + "\n"
+	if _, err := NormalizeAndValidateConfig([]byte(big)); err == nil {
+		t.Fatal("expected oversized postLink to be rejected")
+	}
+}

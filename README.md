@@ -116,6 +116,27 @@ To create a dedicated local MariaDB database at link time, first run
 command. NixCP prints the generated database credentials; put those values in
 the Laravel `.env` file before running migrations.
 
+### Optional site hooks
+
+Add `hooks.postLink` and/or `hooks.postUnlink` commands to `~/.nixcp/config.yaml`
+to run an arbitrary shell command after every successful `ncp link` / `ncp
+unlink` transaction (including runs that end with application-level health
+warnings):
+
+```yaml
+hooks:
+  postLink: curl -fs http://127.0.0.1:9000/internal/domains -d "$VHOST"
+  postUnlink: curl -fs http://127.0.0.1:9000/internal/domains/remove -d "$VHOST"
+```
+
+Each hook runs via `sh -c` in the site's project directory with these
+environment variables: `VHOST` (the nginx domain), `PHP_VERSION`, `SITE_DIR`
+(the project path used by the site), and `DB_NAME` (set only when the site has
+a MariaDB database). Hooks are strictly optional: their stdout and stderr are
+printed verbatim as they come (regardless of the exit code), and a failing
+hook never rolls back or fails the operation — e.g. to register and
+deregister the domain with a reverse proxy from `$VHOST`.
+
 ## Supported surface
 
 Run `ncp help` for the complete contract, `ncp help php` for PHP usage, and

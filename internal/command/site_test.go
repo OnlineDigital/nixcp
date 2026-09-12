@@ -70,6 +70,123 @@ func TestLinkThenUnlinkUsesTransactionalSiteState(t *testing.T) {
 	}
 }
 
+func TestLinkRunsPostLinkHookWithSiteEnv(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, "public"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	var hookCmd *execx.Command
+	runner := &execx.FakeRunner{Handle: func(cmd *execx.Command) (execx.Result, error) {
+		if cmd.Name == "sh" && len(cmd.Args) == 2 && cmd.Args[0] == "-c" {
+			hookCmd = cmd
+			return execx.Result{ExitCode: 0, Stdout: "registered " + os.Getenv("VHOST")}, nil
+		}
+		return execx.Result{ExitCode: 0}, nil
+	}}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(runner), withPlatform(acceptingPlatform{}), func(rt *Runtime) { rt.Services = testSystemd{}; rt.Transactions = testTransaction(home) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	if err = store.Initialize(testSiteConfig(home)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Config.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	snap.Config.Services.MariaDB = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	snap.Config.Hooks.PostLink = "notify-proxy $VHOST"
+	if err = store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"--json", "link", "example.test", "--php", "8.3", "--template", "laravel", "--mariadb", "app", "--path", project})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("link exit %d: out=%s err=%s", code, out, stderr)
+	}
+	if hookCmd == nil {
+		t.Fatal("postLink hook was not executed")
+	}
+	env := map[string]string{}
+	for _, kv := range hookCmd.Env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			env[k] = v
+		}
+	}
+	for key, want := range map[string]string{
+		"VHOST":       "example.test",
+		"PHP_VERSION": "8.3",
+		"SITE_DIR":    project,
+		"DB_NAME":     "app",
+	} {
+		if env[key] != want {
+			t.Errorf("hook env %s=%q, want %q", key, env[key], want)
+		}
+	}
+	if hookCmd.Args[1] != "notify-proxy $VHOST" {
+		t.Errorf("hook command = %q", hookCmd.Args[1])
+	}
+	if !strings.Contains(out.String(), "registered") {
+		t.Errorf("hook stdout not printed verbatim: %q", out.String())
+	}
+	// The site must remain linked regardless of hook behavior.
+	snap, err = store.Load()
+	if err != nil || len(snap.Sites) != 1 {
+		t.Fatalf("site missing after hook: %v %#v", err, snap.Sites)
+	}
+}
+
+func TestLinkPostLinkHookFailureDoesNotFailLink(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, "public"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &execx.FakeRunner{Handle: func(cmd *execx.Command) (execx.Result, error) {
+		if cmd.Name == "sh" {
+			return execx.Result{ExitCode: 3, Stderr: "proxy unreachable"}, &execx.ProcessExitError{Cmd: []string{"sh", "-c", cmd.Args[1]}, ExitCode: 3}
+		}
+		return execx.Result{ExitCode: 0}, nil
+	}}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(runner), withPlatform(acceptingPlatform{}), func(rt *Runtime) { rt.Services = testSystemd{}; rt.Transactions = testTransaction(home) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	if err = store.Initialize(testSiteConfig(home)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Config.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	snap.Config.Hooks.PostLink = "notify-proxy $VHOST"
+	if err = store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"--json", "link", "example.test", "--php", "8.3", "--template", "laravel", "--path", project})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("link must succeed despite hook failure; exit %d: out=%s err=%s", code, out, stderr)
+	}
+	if !strings.Contains(out.String(), "postLink hook failed") {
+		t.Errorf("hook failure not surfaced: %s", out)
+	}
+	if !strings.Contains(stderr.String(), "proxy unreachable") {
+		t.Errorf("hook stderr not printed verbatim: %q", stderr.String())
+	}
+	snap, err = store.Load()
+	if err != nil || len(snap.Sites) != 1 {
+		t.Fatalf("site missing after failed hook: %v %#v", err, snap.Sites)
+	}
+}
+
 func TestLinkWithMariaDBWritesPrivateSecretFile(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	if err := os.Mkdir(filepath.Join(project, "public"), 0755); err != nil {
@@ -396,4 +513,120 @@ func (testSystemd) Restart(context.Context, service.Name) error { return nil }
 
 func testSiteConfig(home string) state.ConfigSnapshot {
 	return state.ConfigSnapshot{SchemaVersion: 2, Owner: state.Owner{Username: "u", UID: os.Getuid(), Group: "g", GID: os.Getgid(), Home: home}, Platform: state.Platform{System: "x86_64-linux"}, Rebuild: state.RebuildConfig{Mode: "traditional"}, Services: state.ServiceStates{Nginx: state.ServiceConfig{DesiredState: "stopped"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}}, PHP: state.PHPConfig{Installed: []string{"8.3"}, GlobalDefault: "8.3"}}
+}
+
+func TestUnlinkRunsPostUnlinkHookWithSiteEnv(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(project, "public"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	var hookCmd *execx.Command
+	runner := &execx.FakeRunner{Handle: func(cmd *execx.Command) (execx.Result, error) {
+		if cmd.Name == "sh" && len(cmd.Args) == 2 && cmd.Args[0] == "-c" {
+			hookCmd = cmd
+			return execx.Result{ExitCode: 0, Stdout: "deregistered example.test"}, nil
+		}
+		return execx.Result{ExitCode: 0}, nil
+	}}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(runner), withPlatform(acceptingPlatform{}), func(rt *Runtime) { rt.Services = testSystemd{}; rt.Transactions = testTransaction(home) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	if err = store.Initialize(testSiteConfig(home)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Config.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	snap.Config.Hooks.PostUnlink = "notify-proxy remove $VHOST"
+	snap.Sites = append(snap.Sites, state.SiteConfig{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}})
+	if err = store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"unlink", "example.test", "--yes"})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("unlink exit %d: out=%s err=%s", code, out, stderr)
+	}
+	if hookCmd == nil {
+		t.Fatal("postUnlink hook was not executed")
+	}
+	env := map[string]string{}
+	for _, kv := range hookCmd.Env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			env[k] = v
+		}
+	}
+	for key, want := range map[string]string{
+		"VHOST":       "example.test",
+		"PHP_VERSION": "8.3",
+		"SITE_DIR":    project,
+	} {
+		if env[key] != want {
+			t.Errorf("hook env %s=%q, want %q", key, env[key], want)
+		}
+	}
+	if _, hasDB := env["DB_NAME"]; hasDB {
+		t.Errorf("DB_NAME must not be set for a site without a database")
+	}
+	if hookCmd.Args[1] != "notify-proxy remove $VHOST" {
+		t.Errorf("hook command = %q", hookCmd.Args[1])
+	}
+	if !strings.Contains(out.String(), "deregistered example.test") {
+		t.Errorf("hook stdout not printed verbatim: %q", out.String())
+	}
+	snap, err = store.Load()
+	if err != nil || len(snap.Sites) != 0 {
+		t.Fatalf("site still present after unlink: %v %#v", err, snap.Sites)
+	}
+}
+
+func TestUnlinkPostUnlinkHookFailureDoesNotFailUnlink(t *testing.T) {
+	home, project := t.TempDir(), t.TempDir()
+	runner := &execx.FakeRunner{Handle: func(cmd *execx.Command) (execx.Result, error) {
+		if cmd.Name == "sh" {
+			return execx.Result{ExitCode: 2, Stderr: "proxy timeout"}, &execx.ProcessExitError{Cmd: []string{"sh", "-c", cmd.Args[1]}, ExitCode: 2}
+		}
+		return execx.Result{ExitCode: 0}, nil
+	}}
+	app, err := New(context.Background(), WithStateHome(home), WithRunner(runner), withPlatform(acceptingPlatform{}), func(rt *Runtime) { rt.Services = testSystemd{}; rt.Transactions = testTransaction(home) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := state.NewStore(home)
+	if err = store.Initialize(testSiteConfig(home)); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap.Config.Services.Nginx = state.ServiceConfig{Installed: true, DesiredState: "running"}
+	snap.Config.Hooks.PostUnlink = "notify-proxy remove $VHOST"
+	snap.Sites = append(snap.Sites, state.SiteConfig{SchemaVersion: 2, ID: "example-test", Enabled: true, Domain: "example.test", ProjectPath: project, DocumentRoot: project, PHP: "8.3", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}})
+	if err = store.WriteSnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	app.Root.SetArgs([]string{"--json", "unlink", "example.test", "--yes"})
+	out, stderr := &bytes.Buffer{}, &bytes.Buffer{}
+	app.Root.SetOut(out)
+	app.Root.SetErr(stderr)
+	if code := app.Execute(); code != 0 {
+		t.Fatalf("unlink must succeed despite hook failure; exit %d: out=%s err=%s", code, out, stderr)
+	}
+	if !strings.Contains(out.String(), "postUnlink hook failed") {
+		t.Errorf("hook failure not surfaced: %s", out)
+	}
+	if !strings.Contains(stderr.String(), "proxy timeout") {
+		t.Errorf("hook stderr not printed verbatim: %q", stderr.String())
+	}
+	snap, err = store.Load()
+	if err != nil || len(snap.Sites) != 0 {
+		t.Fatalf("site still present after unlink: %v %#v", err, snap.Sites)
+	}
 }

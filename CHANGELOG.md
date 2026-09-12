@@ -7,6 +7,17 @@ and generated-module marker compatibility are part of the release contract.
 
 ### Added
 
+- Post-link and post-unlink hooks: optional `hooks.postLink` and
+  `hooks.postUnlink` command strings in `~/.nixcp/config.yaml` that NixCP
+  executes with `sh -c` after a successful `ncp link` / `ncp unlink`
+  transaction — including runs that finish with application-level health
+  warnings. Each hook receives `VHOST` (the nginx domain), `PHP_VERSION`,
+  `SITE_DIR` (the site's project path), and `DB_NAME` (set only when the site
+  has a MariaDB database) as environment variables and runs in the project
+  directory. Hooks are strictly best-effort: their stdout and stderr are
+  printed verbatim (bounded) regardless of the exit code, and a failing hook
+  never rolls back or fails the operation.
+
 - Laravel runtime controls: `ncp enable schedule` manages a marked,
   per-minute crontab entry for `ncp php artisan schedule:run`; `ncp enable`
   and `ncp disable` manage user-systemd units in

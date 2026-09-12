@@ -31,6 +31,20 @@ type ConfigSnapshot struct {
 	PHP             PHPConfig           `yaml:"php"`
 	MariaDBRegistry MariaDBRegistry     `yaml:"mariadbRegistry,omitempty"`
 	Aliases         map[string][]string `yaml:"aliases,omitempty"`
+	Hooks           HooksConfig         `yaml:"hooks,omitempty"`
+}
+
+// HooksConfig holds optional user-provided commands that NixCP runs after
+// specific operations succeed. Hooks are best-effort: their failure never
+// rolls back or fails the main operation.
+type HooksConfig struct {
+	// PostLink runs via `sh -c` after a successful `ncp link` transaction
+	// (including health-check warnings). Available env: VHOST, PHP_VERSION,
+	// DB_NAME (set only when a database was linked), SITE_DIR.
+	PostLink string `yaml:"postLink,omitempty"`
+	// PostUnlink runs via `sh -c` after a successful `ncp unlink`
+	// transaction, with the same environment as PostLink.
+	PostUnlink string `yaml:"postUnlink,omitempty"`
 }
 
 type Owner struct {
@@ -139,8 +153,10 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		PHP             phpYAML             `yaml:"php"`
 		MariaDBRegistry MariaDBRegistry     `yaml:"mariadbRegistry,omitempty"`
 		Aliases         map[string][]string `yaml:"aliases,omitempty"`
+		Hooks           *HooksConfig        `yaml:"hooks,omitempty"`
 	}
 	var target, globalDefault *string
+	var hooks *HooksConfig
 	if cfg.Rebuild.Target != "" {
 		value := cfg.Rebuild.Target
 		target = &value
@@ -149,7 +165,11 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		value := cfg.PHP.GlobalDefault
 		globalDefault = &value
 	}
-	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}, cfg.MariaDBRegistry, cfg.Aliases}, nil
+	if cfg.Hooks.PostLink != "" || cfg.Hooks.PostUnlink != "" {
+		value := cfg.Hooks
+		hooks = &value
+	}
+	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}, cfg.MariaDBRegistry, cfg.Aliases, hooks}, nil
 }
 
 func (cfg *ConfigSnapshot) Canonicalize() {
@@ -168,6 +188,8 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 	if len(cfg.Aliases) == 0 {
 		cfg.Aliases = nil
 	}
+	cfg.Hooks.PostLink = strings.TrimSpace(cfg.Hooks.PostLink)
+	cfg.Hooks.PostUnlink = strings.TrimSpace(cfg.Hooks.PostUnlink)
 	for _, s := range []*ServiceConfig{&cfg.Services.Nginx, &cfg.Services.MariaDB, &cfg.Services.Valkey} {
 		s.DesiredState = strings.ToLower(strings.TrimSpace(s.DesiredState))
 	}
@@ -185,6 +207,15 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 	sort.Strings(cfg.PHP.Extensions)
 	sort.Strings(cfg.MariaDBRegistry.Databases)
 }
+// validateHook enforces the shared contract of user hook commands: a
+// single line, bounded length, no control characters.
+func validateHook(hook, name string) error {
+	if len(hook) > 4096 || strings.ContainsAny(hook, "\x00\r\n") {
+		return newStateError("invalid_hook", name+" must be a single-line command within the size limit", nil)
+	}
+	return nil
+}
+
 func (site *SiteConfig) Canonicalize() {
 	site.ID = strings.TrimSpace(strings.ToLower(site.ID))
 	site.Domain = strings.TrimSpace(strings.ToLower(site.Domain))
@@ -266,6 +297,12 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 		}
 		return s, nil
 	}); err != nil {
+		return err
+	}
+	if err := validateHook(cfg.Hooks.PostLink, "hooks.postLink"); err != nil {
+		return err
+	}
+	if err := validateHook(cfg.Hooks.PostUnlink, "hooks.postUnlink"); err != nil {
 		return err
 	}
 	return nil

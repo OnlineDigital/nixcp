@@ -9,6 +9,7 @@ import (
 
 	"github.com/nixcp/nixcp/internal/database"
 	apperrors "github.com/nixcp/nixcp/internal/errors"
+	"github.com/nixcp/nixcp/internal/execx"
 	"github.com/nixcp/nixcp/internal/nginxsnippet"
 	"github.com/nixcp/nixcp/internal/output"
 	sitepkg "github.com/nixcp/nixcp/internal/site"
@@ -257,6 +258,19 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	if len(quiet) > 0 && quiet[0] {
 		return nil
 	}
+	// Best-effort site hooks: run after the transaction has committed (even
+	// with application-level health warnings, which never trigger rollback).
+	// Their output is printed verbatim; their failure never fails or rolls
+	// back the operation.
+	var hookWarning string
+	if action == "link" {
+		hookWarning = runSiteHook(cmd, runtime, site, snap.Config.Hooks.PostLink, "postLink")
+	} else if action == "unlink" {
+		hookWarning = runSiteHook(cmd, runtime, site, snap.Config.Hooks.PostUnlink, "postUnlink")
+	}
+	if hookWarning != "" {
+		appWarnings = append(appWarnings, hookWarning)
+	}
 	data := map[string]any{"id": site.ID, "domain": site.Domain, "php": site.PHP, "documentRoot": site.DocumentRoot, "handler": site.Nginx.Handler.Type, "phase": result.Phase}
 	if site.MariaDB != nil {
 		data["mariadb"] = map[string]any{"database": site.MariaDB.Database, "user": site.MariaDB.User, "password": site.MariaDB.Password}
@@ -270,6 +284,13 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %s\n", ui.OKLine(action), site.Domain, result.Phase)
 	for _, w := range appWarnings {
+		if w == hookWarning {
+			// The post-link hook is strictly optional: its failure is reported
+			// but the site stays linked, so use its own phrasing, not the
+			// health-warning suffix.
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s (site remains linked; hook is optional)\n", ui.WarnLine(w))
+			continue
+		}
 		fmt.Fprintf(cmd.OutOrStdout(), "  %s (infrastructure applied; application errors do not trigger rollback)\n", ui.WarnLine(w))
 	}
 	if site.MariaDB != nil {
@@ -325,6 +346,60 @@ func siteTransactionHealth(runtime Runtime, snap state.Snapshot) sitepkg.Transac
 func newUnlinkCommand(runtime Runtime) *cobra.Command {
 	return &cobra.Command{Use: "unlink <domain-or-site-id>", Short: "Remove a site", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error { return runUnlink(c, runtime, a[0]) }}
 }
+
+// runSiteHook executes a user-configured hook command (hooks.postLink or
+// hooks.postUnlink) via `sh -c` after a successful site transaction
+// (including runs that ended with application-level health warnings, which
+// never roll back). The environment exposes VHOST (the nginx domain),
+// PHP_VERSION, SITE_DIR (the project path), and DB_NAME when the site has a
+// database; the hook runs in the project directory.
+//
+// Hooks are strictly best-effort: the child's stdout and stderr are printed
+// verbatim (bounded) to the CLI's stdout and stderr regardless of the exit
+// code, and a failing hook never fails or rolls back the operation. The
+// return value is a short warning line for the JSON/human envelopes (empty
+// when the hook succeeded silently).
+func runSiteHook(cmd *cobra.Command, runtime Runtime, site state.SiteConfig, hook, label string) string {
+	hook = strings.TrimSpace(hook)
+	if hook == "" {
+		return ""
+	}
+	env := append(os.Environ(),
+		"VHOST="+site.Domain,
+		"PHP_VERSION="+site.PHP,
+		"SITE_DIR="+site.ProjectPath,
+	)
+	if site.MariaDB != nil {
+		env = append(env, "DB_NAME="+site.MariaDB.Database)
+	}
+	result, err := runtime.Runner.Run(cmd.Context(), &execx.Command{
+		Name: "sh",
+		Args: []string{"-c", hook},
+		Env:  env,
+		Dir:  site.ProjectPath,
+	})
+	const maxHookOutput = 8 << 10
+	// Always surface the hook's streams, success or failure, as they came.
+	if out := strings.TrimSuffix(result.Stdout, "\n"); out != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), truncateHookOutput(out, maxHookOutput))
+	}
+	if errOut := strings.TrimSuffix(result.Stderr, "\n"); errOut != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), truncateHookOutput(errOut, maxHookOutput))
+	}
+	if err != nil {
+		return fmt.Sprintf("%s hook failed (exit %d); no rollback, operation unchanged", label, result.ExitCode)
+	}
+	return ""
+}
+
+// truncateHookOutput bounds hook diagnostics in CLI and JSON output.
+func truncateHookOutput(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit] + "…[truncated]"
+}
+
 func runUnlink(cmd *cobra.Command, runtime Runtime, key string) error {
 	store, e := siteStore(runtime)
 	if e != nil {

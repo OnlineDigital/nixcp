@@ -189,7 +189,8 @@ func confirmImport(cmd *cobra.Command, runner execx.Runner, rebuild state.Rebuil
 	if runner == nil {
 		return fmt.Errorf("command runner is unavailable")
 	}
-	args := []string{"build"}
+	// nixos-rebuild otherwise writes a ./result symlink for this validation-only build.
+	args := []string{"build", "--no-out-link"}
 	if rebuild.Mode == "flake" {
 		args = append(args, "--flake", rebuild.Target)
 		if rebuild.Impure {

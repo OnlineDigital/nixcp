@@ -61,7 +61,7 @@ func TestConfirmImportUsesArgvAndNeverSwitches(t *testing.T) {
 	if err := confirmImport(cmd, runner, stateRebuild("flake", ".#h", true)); err != nil {
 		t.Fatal(err)
 	}
-	if len(runner.Runs) != 1 || runner.Runs[0].Name != "nixos-rebuild" || runner.Runs[0].Args[0] != "build" {
+	if len(runner.Runs) != 1 || runner.Runs[0].Name != "nixos-rebuild" || runner.Runs[0].Args[0] != "build" || runner.Runs[0].Args[1] != "--no-out-link" {
 		t.Fatalf("unexpected commands: %#v", runner.Runs)
 	}
 }

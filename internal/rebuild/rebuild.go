@@ -35,7 +35,10 @@ func (r NixOS) Build(ctx context.Context, candidate string) error {
 	if candidate == "" {
 		return fmt.Errorf("candidate path is required")
 	}
-	result, err := r.run(ctx, "nixos-rebuild", []string{"build", "-I", "nixos-config=" + candidate})
+	// nixos-rebuild build creates a ./result symlink unless explicitly disabled.
+	// Candidate builds are an internal validation step, so never leave one in
+	// the caller's working directory.
+	result, err := r.run(ctx, "nixos-rebuild", []string{"build", "--no-out-link", "-I", "nixos-config=" + candidate})
 	if err != nil {
 		return commandError("candidate build", result, err)
 	}

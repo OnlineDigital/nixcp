@@ -189,15 +189,21 @@ func confirmImport(cmd *cobra.Command, runner execx.Runner, rebuild state.Rebuil
 	if runner == nil {
 		return fmt.Errorf("command runner is unavailable")
 	}
-	// nixos-rebuild otherwise writes a ./result symlink for this validation-only build.
-	args := []string{"build", "--no-out-link"}
+	args := []string{"build"}
 	if rebuild.Mode == "flake" {
 		args = append(args, "--flake", rebuild.Target)
 		if rebuild.Impure {
 			args = append(args, "--impure")
 		}
 	}
-	result, err := runner.Run(cmd.Context(), &execx.Command{Name: "nixos-rebuild", Args: args})
+	// nixos-rebuild has no --no-out-link option. Use a private directory for
+	// this validation-only build, then remove its result symlink with it.
+	dir, err := os.MkdirTemp("", "nixcp-confirm-import-")
+	if err != nil {
+		return fmt.Errorf("create private build directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	result, err := runner.Run(cmd.Context(), &execx.Command{Name: "nixos-rebuild", Args: args, Dir: dir})
 	if err != nil {
 		return fmt.Errorf("nixos-rebuild %s failed: %s", strings.Join(args, " "), strings.TrimSpace(result.Stderr))
 	}

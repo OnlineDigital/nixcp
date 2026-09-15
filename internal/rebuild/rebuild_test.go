@@ -31,12 +31,15 @@ func TestNixOSUsesRestrictedArgv(t *testing.T) {
 		got = append(got, append([]string{cmd.Name}, cmd.Args...))
 	}
 	want := [][]string{
-		{"nixos-rebuild", "build", "--no-out-link", "-I", "nixos-config=/safe/candidate"},
+		{"nixos-rebuild", "build", "-I", "nixos-config=/safe/candidate"},
 		{"sudo", "--", "nixos-rebuild", "switch", "--flake", ".#host", "--impure"},
 		{"sudo", "--", "/nix/store/generation/bin/switch-to-configuration", "switch"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got argv %q, want %q", got, want)
+	}
+	if fake.Runs[0].Dir == "" {
+		t.Fatal("candidate build must run in a private directory")
 	}
 }
 

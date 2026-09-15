@@ -5,6 +5,7 @@ package rebuild
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/nixcp/nixcp/internal/execx"
@@ -35,10 +36,15 @@ func (r NixOS) Build(ctx context.Context, candidate string) error {
 	if candidate == "" {
 		return fmt.Errorf("candidate path is required")
 	}
-	// nixos-rebuild build creates a ./result symlink unless explicitly disabled.
-	// Candidate builds are an internal validation step, so never leave one in
-	// the caller's working directory.
-	result, err := r.run(ctx, "nixos-rebuild", []string{"build", "--no-out-link", "-I", "nixos-config=" + candidate})
+	// nixos-rebuild has no --no-out-link option. Run this validation-only build
+	// in a private temporary directory instead, so its result symlink cannot
+	// clutter the caller's working directory.
+	dir, err := os.MkdirTemp("", "nixcp-rebuild-")
+	if err != nil {
+		return fmt.Errorf("create private build directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	result, err := r.run(ctx, "nixos-rebuild", []string{"build", "-I", "nixos-config=" + candidate}, dir)
 	if err != nil {
 		return commandError("candidate build", result, err)
 	}
@@ -72,11 +78,15 @@ func (r NixOS) Rollback(ctx context.Context, generation string) error {
 	return nil
 }
 
-func (r NixOS) run(ctx context.Context, name string, args []string) (execx.Result, error) {
+func (r NixOS) run(ctx context.Context, name string, args []string, dir ...string) (execx.Result, error) {
 	if r.Runner == nil {
 		return execx.Result{}, fmt.Errorf("command runner unavailable")
 	}
-	return r.Runner.Run(ctx, &execx.Command{Name: name, Args: args, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
+	workingDir := ""
+	if len(dir) > 0 {
+		workingDir = dir[0]
+	}
+	return r.Runner.Run(ctx, &execx.Command{Name: name, Args: args, Dir: workingDir, StdoutMax: execx.DefaultStdoutLimit, StderrMax: execx.DefaultStderrLimit})
 }
 
 func commandError(step string, result execx.Result, err error) error {

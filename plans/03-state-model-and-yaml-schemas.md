@@ -48,7 +48,13 @@ php:
   installed: []
   extensions: []
   globalDefault: null
+  maxUploadSize: 2G
 ```
+
+`php.maxUploadSize` este o singură limită globală, exprimată cu sufix `K`, `M`
+sau `G`. Valoarea implicită este `2G`; generatorul o aplică atât prin
+`services.nginx.clientMaxBodySize`, cât și prin `upload_max_filesize` și
+`post_max_size` în toate pool-urile PHP-FPM administrate.
 
 Owner-ul este capturat la install și nu este o opțiune liber editabilă fără reinitializare controlată. `rebuild.impure` este validat în funcție de strategia de import; nu devine o metodă de a injecta argumente arbitrare.
 

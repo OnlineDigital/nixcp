@@ -27,6 +27,7 @@ php:
   installed: ["8.3", "8.4"]
   extensions: [curl, intl, mbstring, opcache, pdo_mysql, redis]
   globalDefault: "8.4"
+  maxUploadSize: 2G
 ```
 
 Resolver-ul inspectează extension set-ul fiecărei versiuni. Exemple precum `redis` și `opcache` sunt acceptate numai dacă există efectiv în nixpkgs pentru acea versiune/revizie.

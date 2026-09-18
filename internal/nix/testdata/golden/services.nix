@@ -4,6 +4,7 @@
   assertions = [{ assertion = pkgs.stdenv.hostPlatform.system == "x86_64-linux"; message = "NixCP requires x86_64-linux"; }];
   environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
   services.nginx.enable = true;
+  services.nginx.clientMaxBodySize = "2G";
   systemd.services."nginx".wantedBy = lib.mkForce [];
   services.mysql.enable = true;
   services.mysql.package = pkgs.mariadb;

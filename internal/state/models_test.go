@@ -67,6 +67,25 @@ func TestCanonicalConfigSortsAndDedupes(t *testing.T) {
 	if len(cfg.PHP.Extensions) != 3 {
 		t.Fatalf("canonicalization must preserve duplicates for validation: %#v", cfg.PHP.Extensions)
 	}
+	if cfg.PHP.MaxUploadSize != "2G" {
+		t.Fatalf("expected default max upload size, got %q", cfg.PHP.MaxUploadSize)
+	}
+}
+
+func TestMaxUploadSizeCanonicalizationAndValidation(t *testing.T) {
+	cfg := validConfig("/tmp/u")
+	cfg.PHP.MaxUploadSize = " 512m "
+	cfg.Canonicalize()
+	if cfg.PHP.MaxUploadSize != "512M" {
+		t.Fatalf("expected canonical max upload size, got %q", cfg.PHP.MaxUploadSize)
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("expected valid max upload size: %v", err)
+	}
+	cfg.PHP.MaxUploadSize = "2GB"
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatal("expected invalid max upload size")
+	}
 }
 
 func TestValidateConfigRejectsUnsupportedSchema(t *testing.T) {
@@ -162,6 +181,9 @@ php:
 	}
 	if cfg.SchemaVersion != 2 {
 		t.Fatalf("unexpected schema version: %d", cfg.SchemaVersion)
+	}
+	if cfg.PHP.MaxUploadSize != "2G" {
+		t.Fatalf("missing maxUploadSize must retain the 2G default, got %q", cfg.PHP.MaxUploadSize)
 	}
 }
 

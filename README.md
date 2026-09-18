@@ -137,6 +137,20 @@ printed verbatim as they come (regardless of the exit code), and a failing
 hook never rolls back or fails the operation — e.g. to register and
 deregister the domain with a reverse proxy from `$VHOST`.
 
+### Global upload limit
+
+NixCP uses one upload limit for Nginx and every managed PHP-FPM pool. It
+defaults to `2G` and can be changed in `~/.nixcp/config.yaml` using a `K`, `M`,
+or `G` suffix:
+
+```yaml
+php:
+  maxUploadSize: 2G
+```
+
+The generated module sets Nginx's maximum request body size and PHP's
+`upload_max_filesize` and `post_max_size` from this value.
+
 ## Supported surface
 
 Run `ncp help` for the complete contract, `ncp help php` for PHP usage, and

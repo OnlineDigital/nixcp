@@ -96,6 +96,34 @@ func TestRenderSiteFPMUsesConfiguredExtensions(t *testing.T) {
 	}
 }
 
+func TestRenderAppliesMaxUploadSizeToNginxAndEveryFPMPool(t *testing.T) {
+	path := t.TempDir()
+	c := state.ConfigSnapshot{
+		SchemaVersion: 2,
+		Owner:         state.Owner{Username: "u", Group: "g", Home: "/tmp/u"},
+		Platform:      state.Platform{System: "x86_64-linux"},
+		Rebuild:       state.RebuildConfig{Mode: "traditional"},
+		Services:      state.ServiceStates{Nginx: state.ServiceConfig{Installed: true, DesiredState: "running"}, MariaDB: state.ServiceConfig{DesiredState: "stopped"}, Valkey: state.ServiceConfig{DesiredState: "stopped"}},
+		PHP:           state.PHPConfig{Installed: []string{"8.4"}, MaxUploadSize: "512M"},
+	}
+	sites := []state.SiteConfig{
+		{SchemaVersion: 2, ID: "one", Enabled: true, Domain: "one.test", ProjectPath: path, DocumentRoot: path, PHP: "8.4", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}},
+		{SchemaVersion: 2, ID: "two", Enabled: true, Domain: "two.test", ProjectPath: path, DocumentRoot: path, PHP: "8.4", Nginx: state.NginxConfig{Handler: state.HandlerConfig{Type: "generic"}}},
+	}
+	b, err := (Renderer{}).Render(state.Snapshot{Config: c, Sites: sites})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if !strings.Contains(text, `services.nginx.clientMaxBodySize = "512M";`) {
+		t.Fatalf("nginx max body size was not rendered:\n%s", text)
+	}
+	phpOptions := `phpOptions = "upload_max_filesize = 512M\npost_max_size = 512M";`
+	if count := strings.Count(text, phpOptions); count != 2 {
+		t.Fatalf("expected upload limits in both FPM pools, got %d:\n%s", count, text)
+	}
+}
+
 func TestRenderComposerExposesPHPEntrypoint(t *testing.T) {
 	c := state.ConfigSnapshot{
 		SchemaVersion: 2,

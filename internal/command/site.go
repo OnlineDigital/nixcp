@@ -232,9 +232,9 @@ func applySite(cmd *cobra.Command, runtime Runtime, store *state.Store, snap sta
 		siteHealth := siteTransactionHealth(runtime, snap)
 		// During a site transaction, HTTP error responses from the
 		// application itself must not roll back freshly provisioned
-			// infrastructure (an imported app returns 500 until the database
+		// infrastructure (an imported app returns 500 until the database
 		// import and configuration are done). Socket and nginx checks stay
-			// fatal: they prove the wiring NixCP provisioned actually works.
+		// fatal: they prove the wiring NixCP provisioned actually works.
 		siteHealth.ApplicationWarning = func(status sitepkg.HealthStatus) {
 			appWarnings = append(appWarnings, status.Describe())
 		}

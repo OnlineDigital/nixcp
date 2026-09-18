@@ -7,6 +7,10 @@ and generated-module marker compatibility are part of the release contract.
 
 ### Added
 
+- Global `php.maxUploadSize` configuration, defaulting to `2G`, now drives
+  Nginx's request-body limit and `upload_max_filesize`/`post_max_size` in every
+  managed PHP-FPM pool.
+
 - Post-link and post-unlink hooks: optional `hooks.postLink` and
   `hooks.postUnlink` command strings in `~/.nixcp/config.yaml` that NixCP
   executes with `sh -c` after a successful `ncp link` / `ncp unlink`

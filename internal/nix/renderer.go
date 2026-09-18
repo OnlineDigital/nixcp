@@ -25,6 +25,7 @@ const (
 type Renderer struct{}
 
 func (Renderer) Render(s state.Snapshot) ([]byte, error) {
+	s.Canonicalize()
 	if err := s.Validate(); err != nil {
 		return nil, err
 	}
@@ -40,7 +41,7 @@ func (Renderer) Render(s state.Snapshot) ([]byte, error) {
 	renderPHP(&b, s.Config)
 	renderViteWebSocketMap(&b, s.Sites)
 	for _, site := range sortedSites(s.Sites) {
-		renderSite(&b, site, s.Config.Owner.Username, s.Config.Owner.Group, s.Config.PHP.Extensions)
+		renderSite(&b, site, s.Config.Owner.Username, s.Config.Owner.Group, s.Config.PHP.Extensions, s.Config.PHP.MaxUploadSize)
 	}
 	b.WriteString("}\n")
 	return []byte(b.String()), nil
@@ -68,6 +69,7 @@ func renderViteWebSocketMap(b *strings.Builder, sites []state.SiteConfig) {
 func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 	renderServicePolicy(b, "nginx", c.Services.Nginx, func() {
 		b.WriteString("  services.nginx.enable = true;\n")
+		fmt.Fprintf(b, "  services.nginx.clientMaxBodySize = %s;\n", nixString(c.PHP.MaxUploadSize))
 	})
 	renderServicePolicy(b, "mysql", c.Services.MariaDB, func() {
 		b.WriteString("  services.mysql.enable = true;\n")
@@ -229,7 +231,7 @@ func phpPackageExpression(version string, entry php.Version, extensions []string
 	return fmt.Sprintf("pkgs.%s.withExtensions ({ enabled, all }: enabled ++ [ %s ])", entry.Nixpkgs, strings.Join(extensionsAttrs, " "))
 }
 
-func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, extensions []string) {
+func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, extensions []string, maxUploadSize string) {
 	if !s.Enabled {
 		return
 	}
@@ -244,7 +246,8 @@ func renderSite(b *strings.Builder, s state.SiteConfig, owner, group string, ext
 	// allowing the pool to grow unbounded. `ondemand` cannot meet that minimum:
 	// it always begins with zero workers. Recycling at 200 requests bounds
 	// long-lived worker memory in development.
-	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = %s; settings = { \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(group), phpPackageExpression(s.PHP, entry, extensions))
+	phpOptions := "upload_max_filesize = " + maxUploadSize + "\npost_max_size = " + maxUploadSize
+	fmt.Fprintf(b, "  services.phpfpm.pools.%s = { user = %s; group = %s; phpPackage = %s; phpOptions = %s; settings = { \"listen.owner\" = \"nginx\"; \"listen.group\" = \"nginx\"; \"listen.mode\" = \"0660\"; pm = \"dynamic\"; \"pm.max_children\" = 4; \"pm.start_servers\" = 2; \"pm.min_spare_servers\" = 2; \"pm.max_spare_servers\" = 2; \"pm.max_requests\" = 200; }; };\n", nixString(pool), nixString(owner), nixString(group), phpPackageExpression(s.PHP, entry, extensions), nixString(phpOptions))
 	fmt.Fprintf(b, "  services.nginx.virtualHosts.%s = {\n", nixString(s.Domain))
 	b.WriteString("    listen = [{ addr = \"0.0.0.0\"; port = 80; }];\n")
 	fmt.Fprintf(b, "    root = %s;\n", nixString(s.DocumentRoot))

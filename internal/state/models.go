@@ -18,8 +18,11 @@ import (
 const supportedSchemaVersion = 2
 
 var phpVersionPattern = regexp.MustCompile(`^(?:8\.[0-9]+)$`)
+var uploadSizePattern = regexp.MustCompile(`^[1-9][0-9]{0,5}[KMG]$`)
 var siteIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,127}$`)
 var databasePasswordPattern = regexp.MustCompile(`^[A-Za-z0-9]{16,64}$`)
+
+const defaultMaxUploadSize = "2G"
 
 // ConfigSnapshot is config.yaml. Empty strings encode YAML null for nullable fields.
 type ConfigSnapshot struct {
@@ -76,6 +79,7 @@ type PHPConfig struct {
 	Installed     []string `yaml:"installed"`
 	Extensions    []string `yaml:"extensions"`
 	GlobalDefault string   `yaml:"globalDefault,omitempty"`
+	MaxUploadSize string   `yaml:"maxUploadSize"`
 }
 type MariaDBRegistry struct {
 	Databases []string `yaml:"databases,omitempty"`
@@ -143,6 +147,7 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		Installed     []string `yaml:"installed"`
 		Extensions    []string `yaml:"extensions"`
 		GlobalDefault *string  `yaml:"globalDefault"`
+		MaxUploadSize string   `yaml:"maxUploadSize"`
 	}
 	type configYAML struct {
 		SchemaVersion   int                 `yaml:"schemaVersion"`
@@ -169,7 +174,7 @@ func (cfg ConfigSnapshot) MarshalYAML() (any, error) {
 		value := cfg.Hooks
 		hooks = &value
 	}
-	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault}, cfg.MariaDBRegistry, cfg.Aliases, hooks}, nil
+	return configYAML{cfg.SchemaVersion, cfg.Owner, cfg.Platform, rebuildYAML{cfg.Rebuild.Mode, target, cfg.Rebuild.Impure, cfg.Rebuild.ImportConfirmed}, cfg.Services, phpYAML{cfg.PHP.Installed, cfg.PHP.Extensions, globalDefault, cfg.PHP.MaxUploadSize}, cfg.MariaDBRegistry, cfg.Aliases, hooks}, nil
 }
 
 func (cfg *ConfigSnapshot) Canonicalize() {
@@ -194,6 +199,10 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 		s.DesiredState = strings.ToLower(strings.TrimSpace(s.DesiredState))
 	}
 	cfg.PHP.GlobalDefault = strings.TrimSpace(cfg.PHP.GlobalDefault)
+	cfg.PHP.MaxUploadSize = strings.ToUpper(strings.TrimSpace(cfg.PHP.MaxUploadSize))
+	if cfg.PHP.MaxUploadSize == "" {
+		cfg.PHP.MaxUploadSize = defaultMaxUploadSize
+	}
 	for i := range cfg.PHP.Installed {
 		cfg.PHP.Installed[i] = strings.TrimSpace(cfg.PHP.Installed[i])
 	}
@@ -207,6 +216,7 @@ func (cfg *ConfigSnapshot) Canonicalize() {
 	sort.Strings(cfg.PHP.Extensions)
 	sort.Strings(cfg.MariaDBRegistry.Databases)
 }
+
 // validateHook enforces the shared contract of user hook commands: a
 // single line, bounded length, no control characters.
 func validateHook(hook, name string) error {
@@ -290,6 +300,9 @@ func ValidateConfig(cfg ConfigSnapshot) error {
 	}
 	if cfg.PHP.GlobalDefault != "" && !contains(cfg.PHP.Installed, cfg.PHP.GlobalDefault) {
 		return newStateError("invalid_global_default", "globalDefault must be installed", nil)
+	}
+	if !uploadSizePattern.MatchString(cfg.PHP.MaxUploadSize) {
+		return newStateError("invalid_max_upload_size", "php.maxUploadSize must be a positive size with a K, M, or G suffix", nil)
 	}
 	if err := validateUnique(cfg.MariaDBRegistry.Databases, "mariadb database", func(s string) (string, error) {
 		if !isValidMariaDBName(s) {

@@ -9,13 +9,14 @@
   services.mysql.package = pkgs.mariadb;
   services.mysql.settings.mysqld.bind-address = "127.0.0.1";
   services.mysql.ensureDatabases = [ "app" ];
+  users.users."nixcp".homeMode = "0710";
   systemd.services.nixcp-nginx-home-acl = {
     description = "NixCP Nginx home-directory ACL";
     after = [ "local-fs.target" ];
     before = [ "nginx.service" ];
     wantedBy = [ "nginx.service" ];
     serviceConfig.Type = "oneshot";
-    script = "${pkgs.acl}/bin/setfacl -m u:nginx:--x,m::--x -- '/home/nixcp'";
+    script = "${pkgs.acl}/bin/setfacl -m u:nginx:--x,g::---,m::--x -- '/home/nixcp'";
   };
   systemd.services.nixcp-mariadb-accounts = {
     description = "NixCP per-site MariaDB accounts";

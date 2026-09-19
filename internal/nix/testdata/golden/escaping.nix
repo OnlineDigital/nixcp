@@ -5,13 +5,14 @@
   environment.etc."nixcp/module-marker".text = "nixcp-generated-module-v1\n";
   services.nginx.enable = true;
   services.nginx.clientMaxBodySize = "2G";
+  users.users."nixcp".homeMode = "0710";
   systemd.services.nixcp-nginx-home-acl = {
     description = "NixCP Nginx home-directory ACL";
     after = [ "local-fs.target" ];
     before = [ "nginx.service" ];
     wantedBy = [ "nginx.service" ];
     serviceConfig.Type = "oneshot";
-    script = "${pkgs.acl}/bin/setfacl -m u:nginx:--x,m::--x -- '/home/nixcp'";
+    script = "${pkgs.acl}/bin/setfacl -m u:nginx:--x,g::---,m::--x -- '/home/nixcp'";
   };
   environment.etc."nixcp/composer/bin/composer".source = "${pkgs.phpPackages.composer}/share/php/composer/bin/composer";
   environment.etc."nixcp/php/8.3/bin/php".source = "${(pkgs.php83.withExtensions ({ enabled, all }: enabled ++ [ all.intl all.redis ]))}/bin/php";

@@ -93,16 +93,18 @@ func renderServices(b *strings.Builder, c state.ConfigSnapshot) {
 }
 
 // renderNginxHomeACL makes the owner's home searchable (but not listable) by
-// Nginx before it starts. A later chmod(2) on a directory with an access ACL
-// changes the ACL mask to match the Unix group bits, which can silently turn
-// user:nginx:--x into an ineffective entry after a reboot. Reapplying both the
-// named entry and its mask on every Nginx start keeps document roots below the
-// home directory available without exposing its directory listing.
+// Nginx before it starts. NixOS reapplies users.users.<name>.homeMode during a
+// switch. Its 0700 default changes the ACL mask to --- and silently makes the
+// named Nginx entry ineffective while leaving it present. Declaring 0710 keeps
+// the ACL mask executable across switches; the explicit empty owning-group ACL
+// ensures that only the named Nginx user gains traversal. Reapplying the ACL on
+// every Nginx start also repairs manual permission changes.
 func renderNginxHomeACL(b *strings.Builder, c state.ConfigSnapshot) {
 	if !c.Services.Nginx.Installed || c.Services.Nginx.DesiredState != "running" {
 		return
 	}
-	payload := "@ACL@/bin/setfacl -m u:nginx:--x,m::--x -- " + shellQuote(c.Owner.Home)
+	fmt.Fprintf(b, "  users.users.%s.homeMode = \"0710\";\n", nixString(c.Owner.Username))
+	payload := "@ACL@/bin/setfacl -m u:nginx:--x,g::---,m::--x -- " + shellQuote(c.Owner.Home)
 	encoded := strings.ReplaceAll(nixString(payload), "@ACL@", "${pkgs.acl}")
 	b.WriteString("  systemd.services.nixcp-nginx-home-acl = {\n")
 	b.WriteString("    description = \"NixCP Nginx home-directory ACL\";\n")
